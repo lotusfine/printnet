@@ -1,0 +1,11 @@
+@import url('https://fonts.googleapis.com/css2?family=Cabin+Sketch:wght@400;700&family=Finger+Paint&family=Fredericka+the+Great&display=swap');
+
+
+@import "tailwindcss";
+
+@theme {
+  /* fuentes de Tailwind */
+  --font-chalk: "Fredericka the Great", serif;
+  --font-paint: "Finger Paint", cursive;
+}
+

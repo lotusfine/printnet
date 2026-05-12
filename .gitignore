@@ -1,0 +1,18 @@
+# Node (Frontend)
+frontend/node_modules/
+frontend/dist/
+frontend/.env*
+
+# Java (Backend)
+backend/target/
+backend/.mvn/
+backend/*.jar
+backend/.settings/
+backend/.classpath
+backend/.project
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.log
