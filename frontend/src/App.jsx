@@ -14,7 +14,7 @@ function App() {
   const [novedades, setNovedades] = useState([]);
 
   useEffect(() => {
-    const apiUrl = import.meta.env.VITE_API_URL;
+    const apiUrl = '/api';
     Promise.all([
       fetch(`${apiUrl}/informacion`).then(res => res.json()),
       fetch(`${apiUrl}/novedades`).then(res => res.json())

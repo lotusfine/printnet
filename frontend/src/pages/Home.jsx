@@ -25,7 +25,7 @@ const Home = ({ infoGeneral }) => {
                     {frase.trim()}.
                   </p>
                 )
-              ))}
+              )) || <p> Cargando horarios...</p>}
             </div>
           </article>
           
