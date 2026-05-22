@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 
-// Importamos los componentes nuevos
+// Importamos los componentes de las páginas
 import Home from './pages/Home';
 import Novedades from './pages/Novedades';
 
@@ -14,7 +14,7 @@ function App() {
   const [novedades, setNovedades] = useState([]);
 
   useEffect(() => {
-    const apiUrl = '/api';
+    const apiUrl = import.meta.env.VITE_API_URL
     Promise.all([
       fetch(`${apiUrl}/informacion`).then(res => res.json()),
       fetch(`${apiUrl}/novedades`).then(res => res.json())
