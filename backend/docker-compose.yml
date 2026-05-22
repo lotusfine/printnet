@@ -15,17 +15,6 @@ services:
     #   retries: 3
     #   start_period: 30s
 
-  frontend:
-    build: ./frontend
-    container_name: glaxara-frontend
-    ports:
-      - "80:80"
-    depends_on:
-      - backend        
-      #condition: service_healthy
-    networks:
-      - glaxara-network
-
 networks:
   glaxara-network:
     driver: bridge
