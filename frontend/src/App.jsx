@@ -4,6 +4,7 @@ import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 // Importamos los componentes de las páginas
 import Home from './pages/Home';
 import Novedades from './pages/Novedades';
+import Fotocopias from './pages/Fotocopias';
 
 // Importamos assets
 import logo from './assets/logo-glaxara.jpg';
@@ -39,6 +40,7 @@ function App() {
             <ul className="flex gap-4 text-xs font-bold tracking-widest uppercase md:gap-8 md:text-sm text-stone-600">
               <li><Link to="/" className="transition-colors hover:text-amber-700">Inicio</Link></li>
               <li><Link to="/novedades" className="transition-colors hover:text-amber-700">Novedades</Link></li>
+              <li><Link to="/fotocopias" className="transition-colors hover:text-amber-700">Fotocopias</Link></li>
             </ul>
           </nav>
         </header>
@@ -48,6 +50,7 @@ function App() {
             {/* Pasamos los datos como "props" a cada componente */}
             <Route path="/" element={<Home infoGeneral={infoGeneral} />} />
             <Route path="/novedades" element={<Novedades novedades={novedades} />} />
+            <Route path="/fotocopias" element={<Fotocopias />} />
           </Routes>
         </main>
 
