@@ -1,11 +1,9 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import ContactForm, { validateContacto } from '../components/ContactForm';
+import ContactForm, { validateContacto, composeTelefono, DEFAULT_CONTACTO } from '../components/ContactForm';
 import FilesUpload from '../components/fotos/FilesUpload';
 import MaterialSelect, { MATERIALES, FORMATOS } from '../components/fotos/MaterialSelect';
 import FinishOptions from '../components/fotos/FinishOptions';
-
-const DEFAULT_CONTACTO = { nombre: '', telefono: '' };
 
 let nextFileId = 1;
 
@@ -61,7 +59,11 @@ const Fotos = () => {
     if (Object.keys(errs).length > 0) return;
 
     setResumen({
-      contacto: { ...contacto },
+      contacto: {
+        nombre: contacto.nombre,
+        telefono: composeTelefono(contacto),
+        email: contacto.email.trim(),
+      },
       files: files.map((f) => f.name),
       material,
       formato: material === 'hoja-foto' ? formato : null,
@@ -156,6 +158,10 @@ const Fotos = () => {
             <div className="flex justify-between gap-4 py-1.5 border-b border-purple-100">
               <dt className="text-xs font-bold uppercase tracking-widest text-stone-400">Teléfono</dt>
               <dd className="text-sm font-bold text-stone-700 text-right">{resumen.contacto.telefono}</dd>
+            </div>
+            <div className="flex justify-between gap-4 py-1.5 border-b border-purple-100">
+              <dt className="text-xs font-bold uppercase tracking-widest text-stone-400">Email</dt>
+              <dd className="text-sm font-bold text-stone-700 text-right truncate">{resumen.contacto.email}</dd>
             </div>
             <div className="flex justify-between gap-4 py-1.5 border-b border-purple-100">
               <dt className="text-xs font-bold uppercase tracking-widest text-stone-400 shrink-0">

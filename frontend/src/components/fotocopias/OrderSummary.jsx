@@ -12,7 +12,7 @@ const Row = ({ label, value }) => (
   </div>
 );
 
-const OrderSummary = ({ fileInfo, options, onPay }) => {
+const OrderSummary = ({ fileInfo, options, pageRange, onPay }) => {
   const ready = !!fileInfo;
   const total = ready ? calcPrice(fileInfo.pages, options) : 0;
 
@@ -39,6 +39,10 @@ const OrderSummary = ({ fileInfo, options, onPay }) => {
         <div className="space-y-1 mb-6">
           <Row label="Archivo" value={<span className="truncate max-w-[160px] block text-right">{fileInfo.name}</span>} />
           <Row label="Páginas" value={fileInfo.pages} />
+          <Row
+            label="A imprimir"
+            value={pageRange?.modo === 'rango' ? `Páginas ${pageRange.valor.trim() || '—'}` : 'Todas las páginas'}
+          />
           <Row label="Color" value={LABEL.color[options.color]} />
           <Row label="Caras" value={LABEL.caras[options.caras]} />
           <Row label="Tamaño" value={options.tamano} />

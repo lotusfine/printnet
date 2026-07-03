@@ -2,7 +2,19 @@ import { useState, useRef } from 'react';
 
 const SIMULATED_PAGES = 10;
 
-const FileUpload = ({ onFileChange }) => {
+// Valida solo el formato del rango ("3-16" o "5"). La validación contra la
+// cantidad real de páginas del PDF la hará el backend más adelante.
+export const validateRango = (valor) => {
+  const v = valor.trim();
+  if (!v) return 'Ingresá el rango de páginas';
+  if (!/^\d+(-\d+)?$/.test(v)) return 'Formato inválido. Usá "3-16" o un solo número, ej: "5"';
+  const [inicio, fin] = v.split('-').map(Number);
+  if (inicio < 1 || (fin !== undefined && fin < 1)) return 'Las páginas empiezan en 1';
+  if (fin !== undefined && inicio > fin) return 'El inicio del rango no puede ser mayor que el fin';
+  return null;
+};
+
+const FileUpload = ({ onFileChange, pageRange, onPageRangeChange, rangeError }) => {
   const [file, setFile] = useState(null);
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef(null);
@@ -65,6 +77,54 @@ const FileUpload = ({ onFileChange }) => {
           </div>
         </div>
       )}
+
+      {/* Páginas a imprimir */}
+      <fieldset className="mt-6">
+        <legend className="mb-2 text-xs font-bold uppercase tracking-widest text-stone-500">
+          Páginas a imprimir
+        </legend>
+        <div className="flex gap-3">
+          {[
+            { value: 'todas', label: 'Todas las páginas' },
+            { value: 'rango', label: 'Rango específico' },
+          ].map(({ value, label }) => (
+            <button
+              key={value}
+              type="button"
+              role="radio"
+              aria-checked={pageRange.modo === value}
+              onClick={() => onPageRangeChange({ ...pageRange, modo: value })}
+              className={`flex-1 py-3 px-2 rounded-xl border-2 text-sm font-bold transition-all ${
+                pageRange.modo === value
+                  ? 'border-amber-500 bg-amber-200 text-amber-900'
+                  : 'border-stone-200 bg-white text-stone-600 hover:border-amber-300'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {pageRange.modo === 'rango' && (
+          <div className="mt-3">
+            <input
+              type="text"
+              value={pageRange.valor}
+              onChange={(e) => onPageRangeChange({ ...pageRange, valor: e.target.value })}
+              placeholder="Ej: 3-16"
+              className={`w-full px-4 py-3 text-sm font-bold border-2 rounded-xl bg-white text-stone-700 focus:outline-none transition-colors ${
+                rangeError ? 'border-red-400 focus:border-red-500' : 'border-stone-200 focus:border-amber-400'
+              }`}
+            />
+            <p className="mt-1.5 text-xs italic text-stone-400">
+              Indicá desde qué página hasta qué página querés imprimir.
+            </p>
+            {rangeError && (
+              <p className="mt-1.5 text-xs font-bold text-red-500">{rangeError}</p>
+            )}
+          </div>
+        )}
+      </fieldset>
     </article>
   );
 };

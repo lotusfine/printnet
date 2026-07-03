@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import ContactForm, { validateContacto } from '../components/ContactForm';
-import FileUpload from '../components/fotocopias/FileUpload';
+import ContactForm, { validateContacto, DEFAULT_CONTACTO } from '../components/ContactForm';
+import FileUpload, { validateRango } from '../components/fotocopias/FileUpload';
 import PrintOptions from '../components/fotocopias/PrintOptions';
 import OrderSummary from '../components/fotocopias/OrderSummary';
 
@@ -12,23 +12,33 @@ const DEFAULT_OPTIONS = {
   tamano: 'A4',
 };
 
-const DEFAULT_CONTACTO = { nombre: '', telefono: '' };
+const DEFAULT_RANGO = { modo: 'todas', valor: '' };
 
 const Fotocopias = () => {
   const [fileInfo, setFileInfo] = useState(null);
   const [options, setOptions] = useState(DEFAULT_OPTIONS);
   const [contacto, setContacto] = useState(DEFAULT_CONTACTO);
-  const [contactErrors, setContactErrors] = useState({});
+  const [rango, setRango] = useState(DEFAULT_RANGO);
+  const [errors, setErrors] = useState({});
 
   const handleContactoChange = (nuevo) => {
     setContacto(nuevo);
-    setContactErrors({});
+    setErrors({});
+  };
+
+  const handleRangoChange = (nuevo) => {
+    setRango(nuevo);
+    setErrors({});
   };
 
   const handlePay = () => {
-    const errors = validateContacto(contacto);
-    setContactErrors(errors);
-    if (Object.keys(errors).length > 0) return;
+    const errs = validateContacto(contacto);
+    if (rango.modo === 'rango') {
+      const rangoError = validateRango(rango.valor);
+      if (rangoError) errs.rango = rangoError;
+    }
+    setErrors(errs);
+    if (Object.keys(errs).length > 0) return;
     alert('Integración de pago próximamente');
   };
 
@@ -53,10 +63,15 @@ const Fotocopias = () => {
       </header>
 
       <div className="grid w-full gap-8 md:gap-10 md:grid-cols-2">
-        <FileUpload onFileChange={setFileInfo} />
+        <FileUpload
+          onFileChange={setFileInfo}
+          pageRange={rango}
+          onPageRangeChange={handleRangoChange}
+          rangeError={errors.rango}
+        />
         <ContactForm
           contacto={contacto}
-          errors={contactErrors}
+          errors={errors}
           onChange={handleContactoChange}
           accent="amber"
         />
@@ -65,7 +80,12 @@ const Fotocopias = () => {
           options={options}
           onChange={setOptions}
         />
-        <OrderSummary fileInfo={fileInfo} options={options} onPay={handlePay} />
+        <OrderSummary
+          fileInfo={fileInfo}
+          options={options}
+          pageRange={rango}
+          onPay={handlePay}
+        />
       </div>
     </section>
   );
