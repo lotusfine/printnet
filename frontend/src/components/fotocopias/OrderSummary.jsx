@@ -12,12 +12,16 @@ const Row = ({ label, value }) => (
   </div>
 );
 
-const OrderSummary = ({ fileInfo, options }) => {
+const OrderSummary = ({ fileInfo, options, onPay }) => {
   const ready = !!fileInfo;
   const total = ready ? calcPrice(fileInfo.pages, options) : 0;
 
   const handlePay = () => {
-    alert('Integración de pago próximamente');
+    if (onPay) {
+      onPay();
+    } else {
+      alert('Integración de pago próximamente');
+    }
   };
 
   return (

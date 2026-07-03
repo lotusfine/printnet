@@ -4,6 +4,7 @@ import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react
 import Home from './pages/Home';
 import Novedades from './pages/Novedades';
 import Fotocopias from './pages/Fotocopias';
+import Fotos from './pages/Fotos';
 import Admin from './pages/Admin';
 
 import logo from './assets/logo-glaxara.jpg';
@@ -22,6 +23,7 @@ const SiteShell = ({ infoGeneral, novedades }) => (
           <li><Link to="/" className="transition-colors hover:text-amber-700">Inicio</Link></li>
           <li><Link to="/novedades" className="transition-colors hover:text-amber-700">Novedades</Link></li>
           <li><Link to="/fotocopias" className="transition-colors hover:text-amber-700">Fotocopias</Link></li>
+          <li><Link to="/fotos" className="transition-colors hover:text-amber-700">Fotos</Link></li>
         </ul>
       </nav>
     </header>
@@ -31,6 +33,7 @@ const SiteShell = ({ infoGeneral, novedades }) => (
         <Route path="/" element={<Home infoGeneral={infoGeneral} />} />
         <Route path="/novedades" element={<Novedades novedades={novedades} />} />
         <Route path="/fotocopias" element={<Fotocopias />} />
+        <Route path="/fotos" element={<Fotos />} />
       </Routes>
     </main>
 

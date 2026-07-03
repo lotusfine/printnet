@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import ContactForm, { validateContacto } from '../components/ContactForm';
 import FileUpload from '../components/fotocopias/FileUpload';
 import PrintOptions from '../components/fotocopias/PrintOptions';
 import OrderSummary from '../components/fotocopias/OrderSummary';
@@ -11,9 +12,25 @@ const DEFAULT_OPTIONS = {
   tamano: 'A4',
 };
 
+const DEFAULT_CONTACTO = { nombre: '', telefono: '' };
+
 const Fotocopias = () => {
   const [fileInfo, setFileInfo] = useState(null);
   const [options, setOptions] = useState(DEFAULT_OPTIONS);
+  const [contacto, setContacto] = useState(DEFAULT_CONTACTO);
+  const [contactErrors, setContactErrors] = useState({});
+
+  const handleContactoChange = (nuevo) => {
+    setContacto(nuevo);
+    setContactErrors({});
+  };
+
+  const handlePay = () => {
+    const errors = validateContacto(contacto);
+    setContactErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+    alert('Integración de pago próximamente');
+  };
 
   return (
     <section className="flex flex-col space-y-8 md:space-y-12">
@@ -35,20 +52,20 @@ const Fotocopias = () => {
         </div>
       </header>
 
-      <div className="grid w-full gap-8 md:gap-10 md:grid-cols-2 xl:grid-cols-3">
-        <div className="xl:col-span-1">
-          <FileUpload onFileChange={setFileInfo} />
-        </div>
-        <div className="xl:col-span-1">
-          <PrintOptions
-            pages={fileInfo?.pages ?? 10}
-            options={options}
-            onChange={setOptions}
-          />
-        </div>
-        <div className="md:col-span-2 xl:col-span-1">
-          <OrderSummary fileInfo={fileInfo} options={options} />
-        </div>
+      <div className="grid w-full gap-8 md:gap-10 md:grid-cols-2">
+        <FileUpload onFileChange={setFileInfo} />
+        <ContactForm
+          contacto={contacto}
+          errors={contactErrors}
+          onChange={handleContactoChange}
+          accent="amber"
+        />
+        <PrintOptions
+          pages={fileInfo?.pages ?? 10}
+          options={options}
+          onChange={setOptions}
+        />
+        <OrderSummary fileInfo={fileInfo} options={options} onPay={handlePay} />
       </div>
     </section>
   );
