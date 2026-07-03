@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 
 // ─────────────────────────────────────────────
 // DATOS MOCK
@@ -33,13 +33,15 @@ const INIT_ORDERS = [
 const INIT_PRINTERS = [
   {
     id: 1, nombre: 'HP LaserJet 1', tipo: 'laser', estado: 'error',
-    errorTipo: 'Tóner bajo', papel: 75, tonner: 15,
+    errorTipo: 'Tóner bajo', papel: 150, hojas: 150, tonner: 15,
   },
   {
     id: 2, nombre: 'Epson L3250', tipo: 'tinta', estado: 'activa',
-    errorTipo: null, papel: 90, tinta: 80,
+    errorTipo: null, papel: 340, hojas: 340, tinta: 80,
   },
 ];
+
+let nextPrinterId = 3;
 
 // ─────────────────────────────────────────────
 // HELPERS
@@ -372,64 +374,250 @@ const OrdersSection = ({ orders, onTransition, onCancel }) => {
 };
 
 // ─────────────────────────────────────────────
-// PRINTERS SECTION
+// STATS DROPDOWN (header)
 // ─────────────────────────────────────────────
-const PrintersSection = ({ printers, onResolve }) => (
-  <section>
-    <h2 className="text-[10px] font-black uppercase tracking-[0.3em] text-stone-400 mb-4">Estado de Impresoras</h2>
-    <div className="grid gap-3 sm:grid-cols-2">
-      {printers.map((p) => (
-        <div
-          key={p.id}
-          className={`bg-stone-800 border rounded-xl p-4 shadow-sm ${
-            p.estado === 'error' ? 'border-red-500/40' : 'border-stone-700'
-          }`}
-        >
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <p className="text-sm font-black text-white">{p.nombre}</p>
-              <p className="text-[10px] text-stone-500 uppercase tracking-widest mt-0.5">
-                {p.tipo === 'laser' ? 'Láser' : 'Tinta'}
-              </p>
-            </div>
-            <span className={`text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full border ${
-              p.estado === 'activa'
-                ? 'bg-green-500/15 text-green-400 border-green-500/30'
-                : 'bg-red-500/15 text-red-400 border-red-500/30'
-            }`}>
-              {p.estado === 'activa' ? 'Activa' : 'Error'}
-            </span>
-          </div>
+const StatsDropdown = ({ orders }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
 
-          <div className="space-y-3 mb-4">
-            <LevelBar label="Papel" value={p.papel} />
-            {p.tipo === 'laser'
-              ? <LevelBar label="Tóner" value={p.tonner} />
-              : <LevelBar label="Tinta" value={p.tinta} />
-            }
-          </div>
+  useEffect(() => {
+    if (!open) return;
+    const handleClickOutside = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [open]);
 
-          {p.estado === 'error' && (
-            <div className="mt-2 space-y-3">
-              <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
-                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-red-400 shrink-0" viewBox="0 0 24 24" fill="currentColor">
-                  <path fillRule="evenodd" d="M9.401 3.003c1.155-2 4.043-2 5.197 0l7.355 12.748c1.154 2-.29 4.5-2.599 4.5H4.645c-2.309 0-3.752-2.5-2.598-4.5L9.4 3.003zM12 8.25a.75.75 0 01.75.75v3.75a.75.75 0 01-1.5 0V9a.75.75 0 01.75-.75zm0 8.25a.75.75 0 100-1.5.75.75 0 000 1.5z" clipRule="evenodd" />
-                </svg>
-                <span className="text-xs font-bold text-red-400">{p.errorTipo}</span>
+  const pedidosHoy = orders.filter(o => o.estado === 'entregado' || o.estado === 'pendiente').length;
+  const ingresos = orders.filter(o => o.estado !== 'cancelado').reduce((s, o) => s + o.precio, 0);
+  const cancelados = orders.filter(o => o.estado === 'cancelado').length;
+
+  const metrics = [
+    { label: 'Pedidos hoy', value: pedidosHoy, color: 'text-yellow-400' },
+    { label: 'Ingresos del día', value: ars(ingresos), color: 'text-amber-400' },
+    { label: 'Cancelados hoy', value: cancelados, color: 'text-red-400' },
+    { label: 'Tiempo promedio de entrega', value: '12 min', color: 'text-blue-400' },
+    { label: 'Impresora más usada', value: 'HP LaserJet 1', color: 'text-green-400' },
+  ];
+
+  return (
+    <div ref={ref} className="static md:relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className={`flex items-center gap-1.5 p-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${
+          open ? 'text-amber-400 bg-stone-800' : 'text-stone-500 hover:text-stone-300 hover:bg-stone-800'
+        }`}
+        title="Estadísticas"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
+        </svg>
+        <span className="hidden sm:inline">Estadísticas</span>
+      </button>
+
+      {open && (
+        <div className="absolute left-0 right-0 top-full md:left-auto md:right-0 md:w-80 bg-stone-800 border border-stone-700 rounded-b-2xl md:rounded-2xl md:mt-2 shadow-2xl p-4 z-40">
+          <p className="mb-2 text-[10px] font-black uppercase tracking-[0.3em] text-stone-500">
+            Estadísticas del día
+          </p>
+          <div>
+            {metrics.map(({ label, value, color }) => (
+              <div key={label} className="flex items-center justify-between gap-4 py-2.5 border-b border-stone-700/60 last:border-0">
+                <span className="text-xs text-stone-400">{label}</span>
+                <span className={`text-sm font-black ${color}`}>{value}</span>
               </div>
-              <button
-                onClick={() => onResolve(p.id)}
-                className="w-full py-2 rounded-lg bg-stone-700 hover:bg-stone-600 text-stone-200 text-xs font-bold uppercase tracking-widest transition-all active:scale-95"
-              >
-                Marcar como resuelto
-              </button>
-            </div>
-          )}
+            ))}
+          </div>
         </div>
-      ))}
+      )}
     </div>
-  </section>
-);
+  );
+};
+
+// ─────────────────────────────────────────────
+// PRINTERS SIDEBAR
+// ─────────────────────────────────────────────
+const PrinterCard = ({ p, onResolve, onRename, onLoadPaper }) => {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(p.nombre);
+  const [carga, setCarga] = useState('');
+
+  const startEdit = () => {
+    setDraft(p.nombre);
+    setEditing(true);
+  };
+
+  // Si el campo queda vacío, vuelve al nombre anterior sin guardar
+  const saveName = () => {
+    setEditing(false);
+    const v = draft.trim();
+    if (v) onRename(p.id, v);
+  };
+
+  const handleCargar = () => {
+    const n = parseInt(carga, 10);
+    if (!n || n <= 0) return;
+    onLoadPaper(p.id, n);
+    setCarga('');
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-2 mb-1">
+        {editing ? (
+          <input
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={saveName}
+            onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+            className="flex-1 min-w-0 px-2 py-1 text-sm font-black bg-stone-900 border border-amber-500 rounded-lg text-white focus:outline-none"
+          />
+        ) : (
+          <div className="flex items-center gap-1.5 min-w-0">
+            <p className="text-sm font-black text-white truncate">{p.nombre}</p>
+            <button
+              onClick={startEdit}
+              title="Editar nombre"
+              className="shrink-0 p-1 text-stone-500 hover:text-stone-300 transition-colors"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+              </svg>
+            </button>
+          </div>
+        )}
+        <span className={`shrink-0 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full border ${
+          p.estado === 'activa'
+            ? 'bg-green-500/15 text-green-400 border-green-500/30'
+            : 'bg-red-500/15 text-red-400 border-red-500/30'
+        }`}>
+          {p.estado === 'activa' ? 'Activa' : 'Error'}
+        </span>
+      </div>
+      <p className="text-[10px] text-stone-500 uppercase tracking-widest mb-3">
+        {p.tipo === 'laser' ? 'Láser' : 'Tinta'}
+      </p>
+
+      {p.estado === 'error' && (
+        <div className="mb-3 space-y-2">
+          <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-red-400 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+              <path fillRule="evenodd" d="M9.401 3.003c1.155-2 4.043-2 5.197 0l7.355 12.748c1.154 2-.29 4.5-2.599 4.5H4.645c-2.309 0-3.752-2.5-2.598-4.5L9.4 3.003zM12 8.25a.75.75 0 01.75.75v3.75a.75.75 0 01-1.5 0V9a.75.75 0 01.75-.75zm0 8.25a.75.75 0 100-1.5.75.75 0 000 1.5z" clipRule="evenodd" />
+            </svg>
+            <span className="text-xs font-bold text-red-400">{p.errorTipo}</span>
+          </div>
+          <button
+            onClick={() => onResolve(p.id)}
+            className="w-full py-2 rounded-lg bg-stone-700 hover:bg-stone-600 text-stone-200 text-xs font-bold uppercase tracking-widest transition-all active:scale-95"
+          >
+            Marcar como resuelto
+          </button>
+        </div>
+      )}
+
+      <LevelBar
+        label={p.tipo === 'laser' ? 'Tóner' : 'Tinta'}
+        value={p.tipo === 'laser' ? p.tonner : p.tinta}
+      />
+
+      {/* Papel */}
+      <div className="mt-3">
+        <div className="flex justify-between mb-1.5">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-stone-400">Papel</span>
+          <span className="text-[10px] font-bold text-stone-300">{p.hojas} hojas</span>
+        </div>
+        <div className="flex gap-2">
+          <input
+            type="number"
+            min="0"
+            value={carga}
+            onChange={(e) => setCarga(e.target.value)}
+            placeholder="0"
+            className="w-20 px-2 py-1.5 text-xs font-bold bg-stone-900 border border-stone-600 rounded-lg text-white placeholder-stone-600 focus:outline-none focus:border-amber-500 transition-colors"
+          />
+          <button
+            onClick={handleCargar}
+            className="px-3 py-1.5 rounded-lg bg-stone-700/60 hover:bg-stone-700 text-stone-300 text-xs font-bold uppercase tracking-wide transition-all active:scale-95"
+          >
+            Cargar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const PrintersSidebar = ({ printers, onResolve, onRename, onLoadPaper, onAdd }) => {
+  const [formOpen, setFormOpen] = useState(false);
+  const [nombre, setNombre] = useState('');
+
+  const handleAgregar = () => {
+    const v = nombre.trim();
+    if (!v) return;
+    onAdd(v);
+    setNombre('');
+    setFormOpen(false);
+  };
+
+  return (
+    <section className="bg-stone-800/60 border border-stone-700 rounded-2xl p-4">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-[10px] font-black uppercase tracking-[0.3em] text-stone-400">Impresoras</h2>
+        <button
+          onClick={() => setFormOpen((o) => !o)}
+          className="px-2.5 py-1 rounded-lg bg-stone-700/60 hover:bg-stone-700 text-stone-300 text-xs font-bold transition-all"
+        >
+          Conectar +
+        </button>
+      </div>
+
+      {formOpen && (
+        <div className="mb-4 p-3 bg-stone-900/60 border border-stone-700 rounded-xl">
+          <label className="block mb-1.5 text-[10px] font-black uppercase tracking-widest text-stone-500">
+            Nombre de impresora
+          </label>
+          <input
+            autoFocus
+            value={nombre}
+            onChange={(e) => setNombre(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleAgregar(); }}
+            placeholder="Ej: HP LaserJet 2"
+            className="w-full px-3 py-2 mb-2 text-xs font-bold bg-stone-900 border border-stone-600 rounded-lg text-white placeholder-stone-600 focus:outline-none focus:border-amber-500 transition-colors"
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={handleAgregar}
+              className="flex-1 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-white text-xs font-bold uppercase tracking-wide transition-all active:scale-95"
+            >
+              Agregar
+            </button>
+            <button
+              onClick={() => { setFormOpen(false); setNombre(''); }}
+              className="flex-1 py-1.5 rounded-lg bg-stone-700/60 hover:bg-stone-700 text-stone-300 text-xs font-bold uppercase tracking-wide transition-all"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="divide-y divide-stone-700/60">
+        {printers.map((p) => (
+          <div key={p.id} className="py-4 first:pt-0 last:pb-0">
+            <PrinterCard
+              p={p}
+              onResolve={onResolve}
+              onRename={onRename}
+              onLoadPaper={onLoadPaper}
+            />
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+};
 
 // ─────────────────────────────────────────────
 // ADMIN PANEL
@@ -454,11 +642,31 @@ const AdminPanel = ({ onLogout }) => {
     setPrinters(prev => prev.map(p => p.id === id ? { ...p, estado: 'activa', errorTipo: null } : p));
   };
 
+  const handleRenamePrinter = (id, nombre) => {
+    setPrinters(prev => prev.map(p => p.id === id ? { ...p, nombre } : p));
+  };
+
+  const handleAddPrinter = (nombre) => {
+    setPrinters(prev => [
+      ...prev,
+      {
+        id: nextPrinterId++, nombre, tipo: 'laser', estado: 'activa',
+        errorTipo: null, papel: 100, hojas: 100, tonner: 100,
+      },
+    ]);
+  };
+
+  const handleLoadPaper = (id, cantidad) => {
+    setPrinters(prev => prev.map(p =>
+      p.id === id ? { ...p, hojas: p.hojas + cantidad, papel: p.papel + cantidad } : p
+    ));
+  };
+
   return (
     <div className="min-h-screen bg-stone-900 text-white">
       {/* Header */}
       <header className="sticky top-0 z-30 bg-stone-900/80 backdrop-blur border-b border-stone-800 px-4 py-3">
-        <div className="max-w-3xl mx-auto flex items-center justify-between gap-4">
+        <div className="max-w-6xl mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-amber-500 flex items-center justify-center shadow-md shadow-amber-500/20 shrink-0">
               <span className="text-sm font-black text-white">P</span>
@@ -472,6 +680,8 @@ const AdminPanel = ({ onLogout }) => {
             </div>
           </div>
           <div className="flex items-center gap-1">
+            {/* Estadísticas */}
+            <StatsDropdown orders={orders} />
             {/* Campana */}
             <button className="p-2 rounded-xl text-stone-500 hover:text-stone-300 hover:bg-stone-800 transition-all" title="Notificaciones">
               <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -497,11 +707,21 @@ const AdminPanel = ({ onLogout }) => {
         </div>
       </header>
 
-      {/* Contenido */}
-      <main className="max-w-3xl mx-auto px-4 py-6 space-y-8">
-        <StatsRow orders={orders} />
-        <OrdersSection orders={orders} onTransition={handleTransition} onCancel={handleCancelRequest} />
-        <PrintersSection printers={printers} onResolve={handleResolve} />
+      {/* Contenido: sidebar de impresoras (izq. en desktop, al final en mobile) + pedidos */}
+      <main className="max-w-6xl mx-auto px-4 py-6 flex flex-col gap-6 md:flex-row md:items-start">
+        <aside className="order-2 md:order-1 w-full md:w-[280px] md:shrink-0 md:sticky md:top-16 md:h-[calc(100vh-4rem)] md:overflow-y-auto md:pb-6">
+          <PrintersSidebar
+            printers={printers}
+            onResolve={handleResolve}
+            onRename={handleRenamePrinter}
+            onLoadPaper={handleLoadPaper}
+            onAdd={handleAddPrinter}
+          />
+        </aside>
+        <div className="order-1 md:order-2 flex-1 min-w-0 space-y-8">
+          <StatsRow orders={orders} />
+          <OrdersSection orders={orders} onTransition={handleTransition} onCancel={handleCancelRequest} />
+        </div>
       </main>
 
       {/* Modal cancelar */}
