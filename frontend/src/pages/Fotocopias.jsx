@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import ContactForm, { validateContacto, DEFAULT_CONTACTO } from '../components/ContactForm';
+import ContactForm, { validateContacto, composeTelefono, DEFAULT_CONTACTO } from '../components/ContactForm';
 import FileUpload, { validateRango } from '../components/fotocopias/FileUpload';
 import PrintOptions from '../components/fotocopias/PrintOptions';
 import OrderSummary from '../components/fotocopias/OrderSummary';
+import { crearPedido } from '../api';
 
 const DEFAULT_OPTIONS = {
   color: 'byn',
@@ -20,18 +21,24 @@ const Fotocopias = () => {
   const [contacto, setContacto] = useState(DEFAULT_CONTACTO);
   const [rango, setRango] = useState(DEFAULT_RANGO);
   const [errors, setErrors] = useState({});
+  // idle | enviando | exito | error
+  const [envio, setEnvio] = useState({ estado: 'idle' });
 
   const handleContactoChange = (nuevo) => {
     setContacto(nuevo);
     setErrors({});
+    setEnvio({ estado: 'idle' });
   };
 
   const handleRangoChange = (nuevo) => {
     setRango(nuevo);
     setErrors({});
+    setEnvio({ estado: 'idle' });
   };
 
-  const handlePay = () => {
+  const handlePay = async () => {
+    if (envio.estado === 'enviando') return;
+
     const errs = validateContacto(contacto);
     if (rango.modo === 'rango') {
       const rangoError = validateRango(rango.valor);
@@ -39,7 +46,27 @@ const Fotocopias = () => {
     }
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
-    alert('Integración de pago próximamente');
+
+    setEnvio({ estado: 'enviando' });
+    try {
+      const pedido = await crearPedido(
+        {
+          tipo: 'fotocopias',
+          contacto: {
+            nombre: contacto.nombre.trim(),
+            telefono: composeTelefono(contacto),
+            email: contacto.email.trim(),
+          },
+          opciones: options,
+          rango,
+          terminaciones: [],
+        },
+        [fileInfo.file]
+      );
+      setEnvio({ estado: 'exito', pedido });
+    } catch (e) {
+      setEnvio({ estado: 'error', mensaje: e.message });
+    }
   };
 
   return (
@@ -64,7 +91,7 @@ const Fotocopias = () => {
 
       <div className="grid w-full gap-8 md:gap-10 md:grid-cols-2">
         <FileUpload
-          onFileChange={setFileInfo}
+          onFileChange={(info) => { setFileInfo(info); setEnvio({ estado: 'idle' }); }}
           pageRange={rango}
           onPageRangeChange={handleRangoChange}
           rangeError={errors.rango}
@@ -78,15 +105,57 @@ const Fotocopias = () => {
         <PrintOptions
           pages={fileInfo?.pages ?? 10}
           options={options}
-          onChange={setOptions}
+          onChange={(o) => { setOptions(o); setEnvio({ estado: 'idle' }); }}
         />
         <OrderSummary
           fileInfo={fileInfo}
           options={options}
           pageRange={rango}
           onPay={handlePay}
+          enviando={envio.estado === 'enviando'}
         />
       </div>
+
+      {envio.estado === 'error' && (
+        <p className="text-sm font-bold text-red-500 text-center max-w-xl mx-auto">
+          No pudimos crear el pedido: {envio.mensaje}
+        </p>
+      )}
+
+      {envio.estado === 'exito' && (
+        <article className="w-full max-w-2xl mx-auto p-6 md:p-8 bg-green-50 border-2 border-green-300 shadow-xl rounded-sm relative overflow-hidden">
+          <div className="absolute top-0 w-20 h-6 -translate-x-1/2 -translate-y-3 left-1/2 bg-white/60 rotate-2 md:w-24 md:h-8" />
+          <div className="flex items-center justify-center gap-2 mb-6">
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-green-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <h2 className="text-[10px] font-black tracking-[0.3em] uppercase text-stone-500/60">
+              Pedido #{envio.pedido.id} confirmado
+            </h2>
+          </div>
+          <dl className="space-y-2">
+            <div className="flex justify-between gap-4 py-1.5 border-b border-green-100">
+              <dt className="text-xs font-bold uppercase tracking-widest text-stone-400">Estado</dt>
+              <dd className="text-sm font-bold text-stone-700 capitalize">{envio.pedido.estado}</dd>
+            </div>
+            <div className="flex justify-between gap-4 py-1.5 border-b border-green-100">
+              <dt className="text-xs font-bold uppercase tracking-widest text-stone-400">Páginas reales del PDF</dt>
+              <dd className="text-sm font-bold text-stone-700">{envio.pedido.paginas}</dd>
+            </div>
+            <div className="flex justify-between gap-4 py-1.5 border-b border-green-100">
+              <dt className="text-xs font-bold uppercase tracking-widest text-stone-400">Precio final</dt>
+              <dd className="text-lg font-black text-amber-700">${envio.pedido.precio_total?.toLocaleString('es-AR')}</dd>
+            </div>
+            <div className="flex justify-between gap-4 py-1.5">
+              <dt className="text-xs font-bold uppercase tracking-widest text-stone-400 shrink-0">Código de seguimiento</dt>
+              <dd className="text-xs font-mono font-bold text-stone-600 break-all text-right">{envio.pedido.token}</dd>
+            </div>
+          </dl>
+          <p className="mt-6 text-xs italic text-stone-400 text-center">
+            Te enviamos un email con el detalle. Guardá el código para consultar el estado.
+          </p>
+        </article>
+      )}
     </section>
   );
 };

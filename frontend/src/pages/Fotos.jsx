@@ -4,6 +4,7 @@ import ContactForm, { validateContacto, composeTelefono, DEFAULT_CONTACTO } from
 import FilesUpload from '../components/fotos/FilesUpload';
 import MaterialSelect, { MATERIALES, FORMATOS } from '../components/fotos/MaterialSelect';
 import FinishOptions from '../components/fotos/FinishOptions';
+import { crearPedido } from '../api';
 
 let nextFileId = 1;
 
@@ -29,7 +30,7 @@ const Fotos = () => {
     setErrors({});
     setFiles((prev) => [
       ...prev,
-      ...nuevos.map((f) => ({ id: nextFileId++, name: f.name })),
+      ...nuevos.map((f) => ({ id: nextFileId++, name: f.name, file: f })),
     ]);
   };
 
@@ -45,7 +46,13 @@ const Fotos = () => {
     );
   };
 
-  const handleSubmit = () => {
+  const [enviando, setEnviando] = useState(false);
+  const [errorEnvio, setErrorEnvio] = useState(null);
+
+  const handleSubmit = async () => {
+    if (enviando) return;
+    setErrorEnvio(null);
+
     const errs = validateContacto(contacto);
     if (files.length === 0) errs.archivos = 'Agregá al menos un archivo';
     if (!material) {
@@ -58,18 +65,41 @@ const Fotos = () => {
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
 
-    setResumen({
-      contacto: {
-        nombre: contacto.nombre,
-        telefono: composeTelefono(contacto),
-        email: contacto.email.trim(),
-      },
-      files: files.map((f) => f.name),
-      material,
-      formato: material === 'hoja-foto' ? formato : null,
-      gramaje: material === 'opalina' ? gramaje : null,
-      terminaciones: [...terminaciones],
-    });
+    setEnviando(true);
+    try {
+      const pedido = await crearPedido(
+        {
+          tipo: 'fotos',
+          contacto: {
+            nombre: contacto.nombre.trim(),
+            telefono: composeTelefono(contacto),
+            email: contacto.email.trim(),
+          },
+          material,
+          formato: material === 'hoja-foto' ? formato : null,
+          gramaje: material === 'opalina' ? gramaje : null,
+          terminaciones: [...terminaciones],
+        },
+        files.map((f) => f.file)
+      );
+      setResumen({
+        pedido,
+        contacto: {
+          nombre: contacto.nombre,
+          telefono: composeTelefono(contacto),
+          email: contacto.email.trim(),
+        },
+        files: files.map((f) => f.name),
+        material,
+        formato: material === 'hoja-foto' ? formato : null,
+        gramaje: material === 'opalina' ? gramaje : null,
+        terminaciones: [...terminaciones],
+      });
+    } catch (e) {
+      setErrorEnvio(e.message);
+    } finally {
+      setEnviando(false);
+    }
   };
 
   const materialLabel = (value) => MATERIALES.find((m) => m.value === value)?.label ?? value;
@@ -127,13 +157,23 @@ const Fotos = () => {
         <button
           type="button"
           onClick={handleSubmit}
-          className="w-full max-w-md py-4 rounded-xl bg-purple-500 hover:bg-purple-600 active:scale-95 text-white font-black text-sm uppercase tracking-widest transition-all duration-200 shadow-md"
+          disabled={enviando}
+          className={`w-full max-w-md py-4 rounded-xl text-white font-black text-sm uppercase tracking-widest transition-all duration-200 shadow-md ${
+            enviando
+              ? 'bg-stone-300 cursor-not-allowed'
+              : 'bg-purple-500 hover:bg-purple-600 active:scale-95'
+          }`}
         >
-          Enviar Pedido
+          {enviando ? 'Enviando pedido…' : 'Enviar Pedido'}
         </button>
         {Object.keys(errors).length > 0 && (
           <p className="text-xs font-bold text-red-500">
             Revisá los campos marcados antes de enviar
+          </p>
+        )}
+        {errorEnvio && (
+          <p className="text-xs font-bold text-red-500 text-center max-w-md">
+            No pudimos crear el pedido: {errorEnvio}
           </p>
         )}
       </div>
@@ -146,7 +186,7 @@ const Fotos = () => {
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <h2 className="text-[10px] font-black tracking-[0.3em] uppercase text-stone-500/60">
-              Resumen del Pedido
+              Pedido #{resumen.pedido.id} recibido
             </h2>
           </div>
 
@@ -181,11 +221,15 @@ const Fotos = () => {
                 {resumen.gramaje && ` · ${resumen.gramaje} g`}
               </dd>
             </div>
-            <div className="flex justify-between gap-4 py-1.5">
+            <div className="flex justify-between gap-4 py-1.5 border-b border-purple-100">
               <dt className="text-xs font-bold uppercase tracking-widest text-stone-400">Terminaciones</dt>
               <dd className="text-sm font-bold text-stone-700 text-right">
                 {resumen.terminaciones.length > 0 ? resumen.terminaciones.join(' · ') : 'Sin terminaciones'}
               </dd>
+            </div>
+            <div className="flex justify-between gap-4 py-1.5">
+              <dt className="text-xs font-bold uppercase tracking-widest text-stone-400 shrink-0">Código de seguimiento</dt>
+              <dd className="text-xs font-mono font-bold text-stone-600 break-all text-right">{resumen.pedido.token}</dd>
             </div>
           </dl>
 

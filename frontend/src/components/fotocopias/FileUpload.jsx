@@ -22,7 +22,8 @@ const FileUpload = ({ onFileChange, pageRange, onPageRangeChange, rangeError }) 
   const handleFile = (f) => {
     if (!f || f.type !== 'application/pdf') return;
     setFile(f);
-    onFileChange({ name: f.name, pages: SIMULATED_PAGES });
+    // pages es un estimado para la UI; el conteo real lo hace el backend
+    onFileChange({ name: f.name, pages: SIMULATED_PAGES, file: f });
   };
 
   const handleDrop = (e) => {

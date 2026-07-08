@@ -107,7 +107,10 @@ SEED_PRINTERS = [
 
 
 def get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+    # check_same_thread=False: FastAPI puede abrir la conexión y ejecutar el
+    # handler en hilos distintos del threadpool. Cada conexión se usa por un
+    # solo request a la vez, así que es seguro.
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     # Espera hasta 5s si otra conexión tiene el lock (requests + tareas de fondo)

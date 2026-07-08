@@ -43,12 +43,24 @@ El frontend arma estos objetos (verificado en `frontend/src/`):
 - **/fotos** (`Fotos.jsx`): `material: 'hoja-foto'|'vegetal'|'opalina'|'autoadhesiva'`; `formato: '13x18'|'9x13'|'6x9'` (obligatorio con hoja-foto); `gramaje: 120|150|180|240` (obligatorio con opalina); `terminaciones ⊆ ['Anillado','Plastificado','Corte']`; N archivos (imagen/PDF).
 - **/admin** (`Admin.jsx`) espera pedidos con: `{ id, cliente, archivo, paginas, copias, color: bool, doble: bool, acabado: string|null, precio, estado, hace: minutos, contacto: {tel, email} }`.
 
-### Discrepancias conocidas frontend ↔ backend (pendientes de arreglar en el frontend)
+### Estado de la conexión frontend ↔ backend
 
-1. **El frontend aún no envía nada al backend**: los formularios son 100% client-side (el pago es `alert()`), los archivos nunca salen del navegador y las páginas están simuladas en 10. Conectarlo es la próxima tarea de frontend.
-2. **Precio con rango**: la UI muestra el precio del documento completo aunque se elija un rango. El backend cobra por las páginas del rango (correcto). Actualizar `calcPrice` en el frontend.
-3. **Terminaciones en /fotocopias**: la decisión de arquitectura las contempla pero la UI no tiene selector. El contrato ya las acepta (`terminaciones: []`); agregar la UI cuando se decida.
-4. **/admin usa mocks locales**: hay que conectarlo a `GET /admin/orders` y `GET /admin/printers`.
+**El frontend YA está conectado** (cliente en `frontend/src/api.js`, base URL por
+`VITE_PRINTNET_API`, default `http://localhost:8000`):
+- `/fotocopias` y `/fotos` crean pedidos reales con `POST /orders` (multipart con
+  los archivos de verdad) y muestran confirmación con id/token/precio del backend.
+- `/admin` se hidrata con `GET /admin/orders` (poll cada 15s) + `GET /admin/printers`
+  (carga inicial); las transiciones usan `PATCH /admin/orders/{id}`.
+
+Pendientes conocidos:
+1. **Precio con rango**: la UI muestra el precio *estimado* del documento completo
+   aunque se elija un rango; el precio real (por rango) aparece en la confirmación
+   post-envío. Actualizar `calcPrice` si se quiere exactitud pre-envío.
+2. **Terminaciones en /fotocopias**: el contrato las acepta (`terminaciones: []`)
+   pero la UI no tiene selector todavía.
+3. **Gestión de impresoras del admin** (renombrar, agregar, cargar papel, resolver
+   error): sigue siendo estado local del navegador; el backend aún no tiene
+   endpoints de mutación de impresoras.
 
 ## Modelo de datos (SQLite)
 
@@ -65,7 +77,9 @@ El frontend arma estos objetos (verificado en `frontend/src/`):
 
 Migraciones: esquema idempotente (`CREATE TABLE IF NOT EXISTS`) + lista `MIGRACIONES` en `database.py` con `PRAGMA user_version`. WAL activado; `busy_timeout=5000`.
 
-**Nota de concurrencia** (bug encontrado y arreglado en esta sesión): los handlers hacen `db.commit()` explícito ANTES de responder, porque las tareas de fondo (emails) abren su propia conexión y escribirían con el lock tomado.
+**Notas de concurrencia** (bugs encontrados y arreglados en esta sesión):
+- Los handlers hacen `db.commit()` explícito ANTES de responder, porque las tareas de fondo (emails) abren su propia conexión y escribirían con el lock tomado.
+- Las conexiones se abren con `check_same_thread=False`: FastAPI corre los endpoints sync en un threadpool y la conexión puede crearse y usarse en hilos distintos (cada una la usa un solo request a la vez, así que es seguro). Sin esto, requests concurrentes fallaban intermitentemente con 500.
 
 ## Estados y transiciones
 
@@ -166,6 +180,6 @@ curl -s http://localhost:8000/orders/status/<TOKEN>
 
 ## Roadmap (fases futuras)
 
-- Fase 2: conectar el frontend (fetch real en /fotocopias, /fotos y /admin), auth para `/admin/*`.
+- ~~Fase 2: conectar el frontend~~ ✔ hecho (queda: auth para `/admin/*`).
 - Fase 3: MercadoPago real (webhook), impresión real (CUPS en la Pi / SumatraPDF en Windows).
-- Fase 4: WhatsApp, gestión de impresoras desde el admin (hoy el sidebar usa estado local).
+- Fase 4: WhatsApp, endpoints de mutación de impresoras (hoy el sidebar usa estado local).

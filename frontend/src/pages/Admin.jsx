@@ -1,35 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
+import { listarPedidosAdmin, cambiarEstadoPedido, listarImpresoras } from '../api';
 
 // ─────────────────────────────────────────────
 // DATOS MOCK
 // ─────────────────────────────────────────────
-const INIT_ORDERS = [
-  {
-    id: 42, cliente: 'Valentina García', archivo: 'tesis_final_v3.pdf',
-    paginas: 48, copias: 2, color: false, doble: true, acabado: 'Anillado',
-    precio: 830, estado: 'imprimiendo', hace: 3,
-    contacto: { tel: '221-4523891', email: 'vgarcia@mail.com' },
-  },
-  {
-    id: 41, cliente: 'Martín Rodríguez', archivo: 'resumen_clase.pdf',
-    paginas: 12, copias: 1, color: true, doble: false, acabado: 'Retiro en local',
-    precio: 360, estado: 'listo', hace: 8,
-    contacto: { tel: '221-5678234', email: 'mrodriguez@mail.com' },
-  },
-  {
-    id: 40, cliente: 'Sofía Méndez', archivo: 'formulario_inscripcion.pdf',
-    paginas: 4, copias: 3, color: false, doble: false, acabado: null,
-    precio: 240, estado: 'pendiente', hace: 14,
-    contacto: { tel: '221-9012567', email: 'smendes@mail.com' },
-  },
-  {
-    id: 39, cliente: 'Diego Herrera', archivo: 'apuntes_biologia.pdf',
-    paginas: 22, copias: 1, color: false, doble: true, acabado: null,
-    precio: 180, estado: 'entregado', hace: 47,
-    contacto: { tel: '221-3456789', email: 'dherrera@mail.com' },
-  },
-];
-
+// Los pedidos ahora vienen del backend (GET /admin/orders).
+// Las impresoras se cargan del backend, con este fallback si no responde:
 const INIT_PRINTERS = [
   {
     id: 1, nombre: 'HP LaserJet 1', tipo: 'laser', estado: 'error',
@@ -46,7 +22,7 @@ let nextPrinterId = 3;
 // ─────────────────────────────────────────────
 // HELPERS
 // ─────────────────────────────────────────────
-const ars = (n) => `$${n.toLocaleString('es-AR')}`;
+const ars = (n) => (n == null ? 'A cotizar' : `$${n.toLocaleString('es-AR')}`);
 
 const BADGE = {
   pendiente:   'bg-yellow-500/15 text-yellow-300 border border-yellow-500/30',
@@ -172,7 +148,7 @@ const LoginScreen = ({ onLogin }) => {
 const StatsRow = ({ orders }) => {
   const pendientes  = orders.filter(o => o.estado === 'pendiente').length;
   const completados = orders.filter(o => o.estado === 'entregado').length;
-  const ingresos    = orders.filter(o => o.estado !== 'cancelado').reduce((s, o) => s + o.precio, 0);
+  const ingresos    = orders.filter(o => o.estado !== 'cancelado').reduce((s, o) => s + (o.precio ?? 0), 0);
   const cola        = orders.filter(o => o.estado === 'imprimiendo').length;
 
   const stats = [
@@ -248,9 +224,16 @@ const OrderCard = ({ order, onTransition, onCancel }) => {
               <span className="text-[10px] font-black text-stone-500">#{order.id} · hace {order.hace} min</span>
               <p className="text-base font-black text-white mt-0.5">{order.cliente}</p>
             </div>
-            <span className={`shrink-0 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full ${BADGE[order.estado]}`}>
-              {BADGE_LABEL[order.estado]}
-            </span>
+            <div className="flex items-center gap-1.5 shrink-0">
+              {order.requiere_manual && (
+                <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full bg-purple-500/15 text-purple-300 border border-purple-500/30">
+                  Manual
+                </span>
+              )}
+              <span className={`text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full ${BADGE[order.estado]}`}>
+                {BADGE_LABEL[order.estado]}
+              </span>
+            </div>
           </div>
 
           {/* Archivo */}
@@ -264,8 +247,21 @@ const OrderCard = ({ order, onTransition, onCancel }) => {
           {/* Specs */}
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <span className="text-xs text-stone-400">
-              {order.paginas} pág × {order.copias} {order.copias > 1 ? 'copias' : 'copia'} · {order.color ? 'Color' : 'B/N'} · {order.doble ? 'Doble cara' : 'Una cara'}
-              {order.acabado ? ` · ${order.acabado}` : ''}
+              {order.tipo === 'fotos' ? (
+                <>
+                  Especial: {order.material}
+                  {order.formato ? ` ${order.formato}` : ''}
+                  {order.gramaje ? ` ${order.gramaje}g` : ''}
+                  {' · '}{(order.archivos ?? [order.archivo]).length} archivo{(order.archivos ?? [1]).length !== 1 ? 's' : ''}
+                  {order.acabado ? ` · ${order.acabado}` : ''}
+                </>
+              ) : (
+                <>
+                  {order.paginas} pág × {order.copias} {order.copias > 1 ? 'copias' : 'copia'} · {order.color ? 'Color' : 'B/N'} · {order.doble ? 'Doble cara' : 'Una cara'}
+                  {order.rango ? ` · Rango ${order.rango}` : ''}
+                  {order.acabado ? ` · ${order.acabado}` : ''}
+                </>
+              )}
             </span>
             <span className="text-sm font-black text-amber-400 shrink-0">{ars(order.precio)}</span>
           </div>
@@ -390,7 +386,7 @@ const StatsDropdown = ({ orders }) => {
   }, [open]);
 
   const pedidosHoy = orders.filter(o => o.estado === 'entregado' || o.estado === 'pendiente').length;
-  const ingresos = orders.filter(o => o.estado !== 'cancelado').reduce((s, o) => s + o.precio, 0);
+  const ingresos = orders.filter(o => o.estado !== 'cancelado').reduce((s, o) => s + (o.precio ?? 0), 0);
   const cancelados = orders.filter(o => o.estado === 'cancelado').length;
 
   const metrics = [
@@ -623,19 +619,44 @@ const PrintersSidebar = ({ printers, onResolve, onRename, onLoadPaper, onAdd }) 
 // ADMIN PANEL
 // ─────────────────────────────────────────────
 const AdminPanel = ({ onLogout }) => {
-  const [orders, setOrders] = useState(INIT_ORDERS);
+  const [orders, setOrders] = useState([]);
   const [printers, setPrinters] = useState(INIT_PRINTERS);
   const [cancelTarget, setCancelTarget] = useState(null);
+  // 'cargando' | 'ok' | 'error'
+  const [conexion, setConexion] = useState('cargando');
 
-  const handleTransition = (id, newState) => {
-    setOrders(prev => prev.map(o => o.id === id ? { ...o, estado: newState } : o));
+  const cargarPedidos = async () => {
+    try {
+      setOrders(await listarPedidosAdmin());
+      setConexion('ok');
+    } catch {
+      setConexion('error');
+    }
+  };
+
+  useEffect(() => {
+    cargarPedidos();
+    // impresoras: solo carga inicial (la gestión del sidebar sigue siendo local)
+    listarImpresoras().then(setPrinters).catch(() => {});
+    const timer = setInterval(cargarPedidos, 15000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const handleTransition = async (id, newState) => {
+    try {
+      const actualizado = await cambiarEstadoPedido(id, newState);
+      setOrders(prev => prev.map(o => o.id === id ? actualizado : o));
+    } catch (e) {
+      alert(`No se pudo cambiar el estado: ${e.message}`);
+    }
   };
 
   const handleCancelRequest = (id) => setCancelTarget(id);
 
-  const handleCancelConfirm = () => {
-    setOrders(prev => prev.map(o => o.id === cancelTarget ? { ...o, estado: 'cancelado' } : o));
+  const handleCancelConfirm = async () => {
+    const id = cancelTarget;
     setCancelTarget(null);
+    await handleTransition(id, 'cancelado');
   };
 
   const handleResolve = (id) => {
@@ -719,6 +740,22 @@ const AdminPanel = ({ onLogout }) => {
           />
         </aside>
         <div className="order-1 md:order-2 flex-1 min-w-0 space-y-8">
+          {conexion === 'error' && (
+            <div className="flex items-center justify-between gap-3 bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3">
+              <p className="text-xs font-bold text-red-400">
+                No se pudo conectar con el backend (¿está corriendo en el puerto 8000?)
+              </p>
+              <button
+                onClick={cargarPedidos}
+                className="shrink-0 px-3 py-1.5 rounded-lg bg-stone-700/60 hover:bg-stone-700 text-stone-300 text-xs font-bold uppercase tracking-wide transition-all"
+              >
+                Reintentar
+              </button>
+            </div>
+          )}
+          {conexion === 'cargando' && (
+            <div className="h-24 bg-stone-800/60 border border-stone-700 rounded-xl animate-pulse" />
+          )}
           <StatsRow orders={orders} />
           <OrdersSection orders={orders} onTransition={handleTransition} onCancel={handleCancelRequest} />
         </div>

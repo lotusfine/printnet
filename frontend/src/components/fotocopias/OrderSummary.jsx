@@ -12,8 +12,8 @@ const Row = ({ label, value }) => (
   </div>
 );
 
-const OrderSummary = ({ fileInfo, options, pageRange, onPay }) => {
-  const ready = !!fileInfo;
+const OrderSummary = ({ fileInfo, options, pageRange, onPay, enviando = false }) => {
+  const ready = !!fileInfo && !enviando;
   const total = ready ? calcPrice(fileInfo.pages, options) : 0;
 
   const handlePay = () => {
@@ -70,7 +70,7 @@ const OrderSummary = ({ fileInfo, options, pageRange, onPay }) => {
             : 'bg-stone-200 text-stone-400 cursor-not-allowed'}
         `}
       >
-        Pagar con MercadoPago
+        {enviando ? 'Enviando pedido…' : 'Pagar con MercadoPago'}
       </button>
       {!ready && (
         <p className="text-[10px] text-center text-stone-400 mt-2">Subí un archivo para continuar</p>
