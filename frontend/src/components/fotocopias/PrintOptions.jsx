@@ -1,5 +1,8 @@
+// Espejo de backend-printnet/pricing.py — mantener sincronizados
 const PRICE = { byn: 10, color: 25 };
 const A3_SURCHARGE = 1.5;
+const ANILLADO_HASTA_100 = 2000;
+const ANILLADO_MAS_100 = 3500;
 
 const PrintOptions = ({ pages, options, onChange }) => {
   const set = (key, value) => onChange({ ...options, [key]: value });
@@ -86,6 +89,38 @@ const PrintOptions = ({ pages, options, onChange }) => {
           </div>
         </fieldset>
 
+        {/* Anillado */}
+        <fieldset>
+          <legend className="mb-2 text-xs font-bold uppercase tracking-widest text-stone-500">Terminación</legend>
+          <button
+            type="button"
+            onClick={() => set('anillado', !options.anillado)}
+            className={`w-full flex items-center gap-3 py-3 px-4 rounded-xl border-2 text-sm font-bold transition-all text-left ${
+              options.anillado
+                ? 'border-amber-500 bg-amber-200 text-amber-900'
+                : 'border-stone-200 bg-white text-stone-600 hover:border-amber-300'
+            }`}
+          >
+            <span
+              className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-colors ${
+                options.anillado ? 'border-amber-600 bg-amber-600' : 'border-stone-300 bg-white'
+              }`}
+            >
+              {options.anillado && (
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                </svg>
+              )}
+            </span>
+            <span>
+              Anillado
+              <span className="block text-[10px] font-normal mt-0.5 opacity-70">
+                $2.000 hasta 100 hojas · $3.500 más de 100
+              </span>
+            </span>
+          </button>
+        </fieldset>
+
         {/* Copias */}
         <div>
           <label className="block mb-2 text-xs font-bold uppercase tracking-widest text-stone-500">
@@ -121,7 +156,11 @@ export const calcPrice = (pages, options) => {
   const pricePer = options.color === 'color' ? PRICE.color : PRICE.byn;
   const sheets = options.caras === 'doble' ? Math.ceil(pages / 2) : pages;
   const sizeMultiplier = options.tamano === 'A3' ? A3_SURCHARGE : 1;
-  return Math.round(sheets * options.copias * pricePer * sizeMultiplier);
+  let total = Math.round(sheets * options.copias * pricePer * sizeMultiplier);
+  if (options.anillado) {
+    total += options.copias * (sheets <= 100 ? ANILLADO_HASTA_100 : ANILLADO_MAS_100);
+  }
+  return total;
 };
 
 export default PrintOptions;

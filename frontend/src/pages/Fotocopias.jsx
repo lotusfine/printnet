@@ -11,6 +11,17 @@ const DEFAULT_OPTIONS = {
   caras: 'simple',
   copias: 1,
   tamano: 'A4',
+  anillado: false,
+};
+
+// Páginas que se van a imprimir según el rango (espejo de pricing.py)
+const paginasEfectivas = (totalPaginas, rango) => {
+  if (rango.modo !== 'rango') return totalPaginas;
+  const v = rango.valor.trim();
+  if (!/^\d+(-\d+)?$/.test(v)) return totalPaginas;
+  const [inicio, fin = inicio] = v.split('-').map(Number);
+  if (inicio < 1 || inicio > fin) return totalPaginas;
+  return fin - inicio + 1;
 };
 
 const DEFAULT_RANGO = { modo: 'todas', valor: '' };
@@ -49,6 +60,8 @@ const Fotocopias = () => {
 
     setEnvio({ estado: 'enviando' });
     try {
+      // anillado viaja como terminación, no como opción de impresión
+      const { anillado, ...opcionesImpresion } = options;
       const pedido = await crearPedido(
         {
           tipo: 'fotocopias',
@@ -57,9 +70,9 @@ const Fotocopias = () => {
             telefono: composeTelefono(contacto),
             email: contacto.email.trim(),
           },
-          opciones: options,
+          opciones: opcionesImpresion,
           rango,
-          terminaciones: [],
+          terminaciones: anillado ? ['Anillado'] : [],
         },
         [fileInfo.file]
       );
@@ -103,7 +116,7 @@ const Fotocopias = () => {
           accent="amber"
         />
         <PrintOptions
-          pages={fileInfo?.pages ?? 10}
+          pages={paginasEfectivas(fileInfo?.pages ?? 10, rango)}
           options={options}
           onChange={(o) => { setOptions(o); setEnvio({ estado: 'idle' }); }}
         />
@@ -111,6 +124,7 @@ const Fotocopias = () => {
           fileInfo={fileInfo}
           options={options}
           pageRange={rango}
+          pagesACobrar={paginasEfectivas(fileInfo?.pages ?? 10, rango)}
           onPay={handlePay}
           enviando={envio.estado === 'enviando'}
         />

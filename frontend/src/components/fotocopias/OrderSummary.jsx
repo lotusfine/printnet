@@ -12,9 +12,9 @@ const Row = ({ label, value }) => (
   </div>
 );
 
-const OrderSummary = ({ fileInfo, options, pageRange, onPay, enviando = false }) => {
+const OrderSummary = ({ fileInfo, options, pageRange, pagesACobrar, onPay, enviando = false }) => {
   const ready = !!fileInfo && !enviando;
-  const total = ready ? calcPrice(fileInfo.pages, options) : 0;
+  const total = ready ? calcPrice(pagesACobrar ?? fileInfo.pages, options) : 0;
 
   const handlePay = () => {
     if (onPay) {
@@ -47,6 +47,7 @@ const OrderSummary = ({ fileInfo, options, pageRange, onPay, enviando = false })
           <Row label="Caras" value={LABEL.caras[options.caras]} />
           <Row label="Tamaño" value={options.tamano} />
           <Row label="Copias" value={options.copias} />
+          {options.anillado && <Row label="Anillado" value="Sí" />}
           {options.caras === 'doble' && (
             <Row label="Hojas a imprimir" value={Math.ceil(fileInfo.pages / 2)} />
           )}

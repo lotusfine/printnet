@@ -25,6 +25,13 @@ export async function crearPedido(datos, files) {
   return parse(await fetch(`${PRINTNET_API}/orders`, { method: 'POST', body: fd }));
 }
 
+/** Cuenta las páginas reales de un PDF sin crear pedido (para el precio previo). */
+export async function contarPaginas(file) {
+  const fd = new FormData();
+  fd.append('file', file);
+  return parse(await fetch(`${PRINTNET_API}/orders/paginas`, { method: 'POST', body: fd }));
+}
+
 /** Estado público de un pedido por token. */
 export async function consultarEstado(token) {
   return parse(await fetch(`${PRINTNET_API}/orders/status/${token}`));

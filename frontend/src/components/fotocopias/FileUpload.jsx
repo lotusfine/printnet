@@ -1,6 +1,8 @@
 import { useState, useRef } from 'react';
+import { contarPaginas } from '../../api';
 
-const SIMULATED_PAGES = 10;
+// Fallback si el backend no responde al conteo (el precio final igual lo fija el backend)
+const FALLBACK_PAGES = 10;
 
 // Valida solo el formato del rango ("3-16" o "5"). La validación contra la
 // cantidad real de páginas del PDF la hará el backend más adelante.
@@ -19,11 +21,27 @@ const FileUpload = ({ onFileChange, pageRange, onPageRangeChange, rangeError }) 
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef(null);
 
-  const handleFile = (f) => {
+  const [contando, setContando] = useState(false);
+  const [paginas, setPaginas] = useState(null);
+  const [conteoEstimado, setConteoEstimado] = useState(false);
+
+  const handleFile = async (f) => {
     if (!f || f.type !== 'application/pdf') return;
     setFile(f);
-    // pages es un estimado para la UI; el conteo real lo hace el backend
-    onFileChange({ name: f.name, pages: SIMULATED_PAGES, file: f });
+    setContando(true);
+    setConteoEstimado(false);
+    // conteo real en el backend: misma base de precio pre y post compra
+    try {
+      const { paginas: reales } = await contarPaginas(f);
+      setPaginas(reales);
+      onFileChange({ name: f.name, pages: reales, file: f });
+    } catch {
+      setPaginas(FALLBACK_PAGES);
+      setConteoEstimado(true);
+      onFileChange({ name: f.name, pages: FALLBACK_PAGES, file: f });
+    } finally {
+      setContando(false);
+    }
   };
 
   const handleDrop = (e) => {
@@ -74,7 +92,11 @@ const FileUpload = ({ onFileChange, pageRange, onPageRangeChange, rangeError }) 
           </svg>
           <div className="min-w-0">
             <p className="text-sm font-bold text-stone-700 truncate">{file.name}</p>
-            <p className="text-xs text-stone-400">{SIMULATED_PAGES} páginas (simulado)</p>
+            <p className="text-xs text-stone-400">
+              {contando
+                ? 'Contando páginas…'
+                : `${paginas} páginas${conteoEstimado ? ' (estimado)' : ''}`}
+            </p>
           </div>
         </div>
       )}

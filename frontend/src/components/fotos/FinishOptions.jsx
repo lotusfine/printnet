@@ -1,4 +1,7 @@
-export const TERMINACIONES = ['Anillado', 'Plastificado', 'Corte'];
+// Anillado se movió a /fotocopias (donde tiene precio automático).
+// Plastificado: $1.400 hoja A4, $700 media hoja · Corte: $500 hoja A4
+// (precios de referencia — los pedidos de /fotos se cotizan a mano).
+export const TERMINACIONES = ['Plastificado', 'Corte'];
 
 const FinishOptions = ({ terminaciones, onToggle }) => (
   <article className="p-6 md:p-8 bg-purple-50 shadow-xl rounded-sm relative overflow-hidden">

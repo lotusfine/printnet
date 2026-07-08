@@ -109,6 +109,32 @@ def _upsert_customer(db: sqlite3.Connection, contacto) -> int:
     return cur.lastrowid
 
 
+@router.post("/orders/paginas")
+def contar_paginas(file: UploadFile = File(...)):
+    """Cuenta las páginas de un PDF SIN crear pedido.
+
+    Lo usa el frontend apenas se sube el archivo, para que el precio que se
+    muestra ANTES de comprar se calcule con las páginas reales (misma base
+    que el precio final del pedido).
+    """
+    if not _es_pdf(file):
+        raise HTTPException(422, "el archivo debe ser un PDF")
+    import io
+
+    try:
+        from pypdf import PdfReader
+
+        data = file.file.read(MAX_FILE_BYTES + 1)
+        if len(data) > MAX_FILE_BYTES:
+            raise HTTPException(413, "el archivo supera el máximo de 50 MB")
+        paginas = len(PdfReader(io.BytesIO(data)).pages)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(422, "no se pudo leer el PDF para contar sus páginas")
+    return {"paginas": paginas}
+
+
 @router.post("/orders", status_code=201)
 def crear_pedido(
     background: BackgroundTasks,
@@ -162,6 +188,7 @@ def crear_pedido(
             pedido.opciones.color,
             pedido.opciones.caras,
             pedido.opciones.tamano,
+            pedido.terminaciones,
         )
         requiere_manual = bool(pedido.terminaciones)
         opciones_json = {

@@ -22,6 +22,24 @@ PRECIO_POR_PAGINA = {
 
 RECARGO_A3 = 1.5
 
+# Terminaciones. El anillado se cobra POR COPIA según las hojas físicas de
+# cada copia. Plastificado y corte por ahora solo aplican a pedidos de /fotos
+# (que se cotizan a mano); quedan acá como referencia de la tabla de precios.
+ANILLADO_HASTA_100_HOJAS = 2000
+ANILLADO_MAS_100_HOJAS = 3500
+PLASTIFICADO_HOJA_A4 = 1400
+PLASTIFICADO_MEDIA_HOJA = 700
+CORTE_HOJA_A4 = 500
+
+
+def precio_anillado(hojas_por_copia: int, copias: int) -> int:
+    por_copia = (
+        ANILLADO_HASTA_100_HOJAS
+        if hojas_por_copia <= 100
+        else ANILLADO_MAS_100_HOJAS
+    )
+    return por_copia * copias
+
 
 def paginas_del_rango(rango_modo: str, rango_valor: str, total_paginas: int) -> int:
     """Cantidad de páginas a imprimir según el rango.
@@ -46,10 +64,23 @@ def paginas_del_rango(rango_modo: str, rango_valor: str, total_paginas: int) -> 
 
 
 def calcular_precio_fotocopias(
-    paginas: int, copias: int, color: str, caras: str, tamano: str
+    paginas: int,
+    copias: int,
+    color: str,
+    caras: str,
+    tamano: str,
+    terminaciones: list[str] | None = None,
 ) -> int:
-    """Precio total en pesos (entero) para un pedido de /fotocopias."""
+    """Precio total en pesos (entero) para un pedido de /fotocopias.
+
+    IMPORTANTE: esta fórmula debe mantenerse espejada con calcPrice en
+    frontend/src/components/fotocopias/PrintOptions.jsx para que el precio
+    pre-compra coincida con el post-compra.
+    """
     hojas = ceil(paginas / 2) if caras == "doble" else paginas
     por_pagina = PRECIO_POR_PAGINA[color]
     multiplicador = RECARGO_A3 if tamano == "A3" else 1
-    return round(hojas * copias * por_pagina * multiplicador)
+    total = round(hojas * copias * por_pagina * multiplicador)
+    if terminaciones and "Anillado" in terminaciones:
+        total += precio_anillado(hojas, copias)
+    return total

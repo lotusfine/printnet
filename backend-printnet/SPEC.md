@@ -53,11 +53,10 @@ El frontend arma estos objetos (verificado en `frontend/src/`):
   (carga inicial); las transiciones usan `PATCH /admin/orders/{id}`.
 
 Pendientes conocidos:
-1. **Precio con rango**: la UI muestra el precio *estimado* del documento completo
-   aunque se elija un rango; el precio real (por rango) aparece en la confirmación
-   post-envío. Actualizar `calcPrice` si se quiere exactitud pre-envío.
-2. **Terminaciones en /fotocopias**: el contrato las acepta (`terminaciones: []`)
-   pero la UI no tiene selector todavía.
+1. ~~Precio con rango distinto pre/post~~ ✔ resuelto: conteo real vía
+   `POST /orders/paginas` + `calcPrice` espejado con rango y anillado.
+2. ~~Terminaciones en /fotocopias sin UI~~ ✔ resuelto: toggle de Anillado en
+   /fotocopias (con precio automático); Plastificado y Corte quedaron en /fotos.
 3. **Gestión de impresoras del admin** (renombrar, agregar, cargar papel, resolver
    error): sigue siendo estado local del navegador; el backend aún no tiene
    endpoints de mutación de impresoras.
@@ -93,11 +92,27 @@ Triage al crear (decisión de arquitectura 2):
 
 ```
 byn $10/pág · color $25/pág · doble faz: ceil(pág/2) hojas · A3: ×1.5
-total = round(hojas × copias × $ × mult)
+total = round(hojas × copias × $ × mult) [+ anillado]
+
+Terminaciones:
+  Anillado (solo /fotocopias, automático): $2.000 por copia hasta 100 hojas,
+    $3.500 por copia con más de 100 hojas
+  Plastificado: $1.400 hoja A4 · $700 media hoja   (referencia, /fotos a cotizar)
+  Corte: $500 hoja A4                              (referencia, /fotos a cotizar)
 ```
 Las páginas se cuentan del PDF real con pypdf; el rango se valida contra ese total (la validación que el frontend delegó al backend). PDF ilegible → 422.
 
+La fórmula está **espejada** en `frontend/src/components/fotocopias/PrintOptions.jsx`
+(`calcPrice`) — si cambia una, cambiar la otra. Además el frontend usa
+`POST /orders/paginas` al subir el archivo para que el precio previo se calcule
+con las páginas reales: **precio pre-compra ≡ precio post-compra**.
+
 ## Endpoints
+
+### `POST /orders/paginas` (multipart) → 200
+Campo `file`: un PDF. Devuelve `{ paginas }` sin crear pedido. Lo usa el frontend
+al subir el archivo para mostrar conteo y precio reales antes de comprar.
+Errores: 422 (no es PDF / ilegible), 413 (>50 MB).
 
 ### `POST /orders` (multipart) → 201
 - Campo `datos`: string JSON. Discriminado por `tipo`:
