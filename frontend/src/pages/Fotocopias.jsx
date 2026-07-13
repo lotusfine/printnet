@@ -76,6 +76,13 @@ const Fotocopias = () => {
         },
         [fileInfo.file]
       );
+      if (pedido.init_point) {
+        // Pago real: derivar al Checkout Pro de MercadoPago. Al terminar,
+        // MP devuelve al cliente a /estado/{token} (back_urls).
+        setEnvio({ estado: 'redirigiendo' });
+        window.location.href = pedido.init_point;
+        return;
+      }
       setEnvio({ estado: 'exito', pedido });
     } catch (e) {
       setEnvio({ estado: 'error', mensaje: e.message });
@@ -126,9 +133,15 @@ const Fotocopias = () => {
           pageRange={rango}
           pagesACobrar={paginasEfectivas(fileInfo?.pages ?? 10, rango)}
           onPay={handlePay}
-          enviando={envio.estado === 'enviando'}
+          enviando={envio.estado === 'enviando' || envio.estado === 'redirigiendo'}
         />
       </div>
+
+      {envio.estado === 'redirigiendo' && (
+        <p className="text-sm font-bold text-stone-500 text-center">
+          Redirigiendo a MercadoPago para completar el pago…
+        </p>
+      )}
 
       {envio.estado === 'error' && (
         <p className="text-sm font-bold text-red-500 text-center max-w-xl mx-auto">

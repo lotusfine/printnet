@@ -25,6 +25,8 @@ let nextPrinterId = 3;
 const ars = (n) => (n == null ? 'A cotizar' : `$${n.toLocaleString('es-AR')}`);
 
 const BADGE = {
+  pendiente_pago: 'bg-orange-500/15 text-orange-300 border border-orange-500/30',
+  pago_rechazado: 'bg-red-500/15 text-red-300 border border-red-500/30',
   pendiente:   'bg-yellow-500/15 text-yellow-300 border border-yellow-500/30',
   imprimiendo: 'bg-blue-500/15 text-blue-300 border border-blue-500/30',
   listo:       'bg-green-500/15 text-green-300 border border-green-500/30',
@@ -33,11 +35,14 @@ const BADGE = {
 };
 
 const BADGE_LABEL = {
+  pendiente_pago: 'Esperando pago', pago_rechazado: 'Pago rechazado',
   pendiente: 'Pendiente', imprimiendo: 'Imprimiendo',
   listo: 'Listo', entregado: 'Entregado', cancelado: 'Cancelado',
 };
 
 const LEFT_BORDER = {
+  pendiente_pago: 'border-l-4 border-l-orange-500',
+  pago_rechazado: 'border-l-4 border-l-red-600',
   imprimiendo: 'border-l-4 border-l-blue-500',
   listo:       'border-l-4 border-l-green-500',
   pendiente:   'border-l-4 border-l-yellow-500',

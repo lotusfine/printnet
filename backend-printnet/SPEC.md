@@ -260,10 +260,20 @@ Ver `.env.example`. **Nunca commitear ni loggear los valores reales.**
 > mockeada (19 chequeos: firma inválida→401, aprobado→dispatch+email,
 > idempotencia de reintentos, rechazo→pago_rechazado, referencia inexistente).
 
-### Pendientes de frontend para cerrar el circuito
-- Redirigir a `init_point` cuando la respuesta de `POST /orders` lo traiga.
-- Crear la página `/estado/{token}` (destino de las `back_urls`).
-- Badges/estilos en /admin para `pendiente_pago` y `pago_rechazado`.
+### Circuito de frontend ✔ completo
+- /fotocopias redirige a `init_point` cuando la respuesta lo trae.
+- Página `/estado/{token}` (destino de las `back_urls`): badge de estado,
+  descripción, archivos, total; se refresca sola cada 10s.
+- Badges en /admin para `pendiente_pago` y `pago_rechazado`.
+
+### Setup Vercel + Cloudflare Tunnel (dev con pagos reales)
+- El frontend en Vercel (https://printnet.vercel.app) usa la env
+  `VITE_PRINTNET_API` (variable de build: cambiarla requiere redeploy).
+- El backend local se expone con `cloudflared tunnel --url http://localhost:8000`.
+  **La URL del quick tunnel cambia en cada arranque** → al reiniciar el tunnel
+  hay que actualizar: `BASE_URL_PUBLICA` en `.env`, `VITE_PRINTNET_API` en
+  Vercel (+ redeploy) y la URL del webhook en el panel de MercadoPago.
+- El backend carga `backend-printnet/.env` automáticamente (python-dotenv).
 
 ## Cómo correr y probar localmente
 

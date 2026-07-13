@@ -9,9 +9,14 @@ Ver SPEC.md para el contrato completo de la API.
 import logging
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+# Cargar .env (junto a este archivo) antes de que los módulos lean os.environ
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 from database import init_db
 from routers import admin, orders, webhooks

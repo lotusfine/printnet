@@ -5,6 +5,7 @@ import Home from './pages/Home';
 import Novedades from './pages/Novedades';
 import Fotocopias from './pages/Fotocopias';
 import Fotos from './pages/Fotos';
+import Estado from './pages/Estado';
 import Admin from './pages/Admin';
 
 import logo from './assets/logo-glaxara.jpg';
@@ -34,6 +35,7 @@ const SiteShell = ({ infoGeneral, novedades }) => (
         <Route path="/novedades" element={<Novedades novedades={novedades} />} />
         <Route path="/fotocopias" element={<Fotocopias />} />
         <Route path="/fotos" element={<Fotos />} />
+        <Route path="/estado/:token" element={<Estado />} />
       </Routes>
     </main>
 
