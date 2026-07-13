@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import init_db
-from routers import admin, orders
+from routers import admin, orders, webhooks
 
 logging.basicConfig(
     level=logging.INFO,
@@ -50,6 +50,7 @@ app.add_middleware(
 
 app.include_router(orders.router)
 app.include_router(admin.router)
+app.include_router(webhooks.router)
 
 
 @app.get("/")

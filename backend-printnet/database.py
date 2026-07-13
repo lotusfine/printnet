@@ -45,15 +45,18 @@ CREATE TABLE IF NOT EXISTS orders (
     tipo            TEXT NOT NULL CHECK (tipo IN ('fotocopias', 'fotos')),
     customer_id     INTEGER NOT NULL REFERENCES customers(id),
     estado          TEXT NOT NULL DEFAULT 'pendiente'
-                    CHECK (estado IN ('pendiente', 'imprimiendo', 'listo', 'entregado', 'cancelado')),
-    -- Fase 1: todo pedido nace pagado (pago fantasma)
-    pagado          INTEGER NOT NULL DEFAULT 1,
+                    CHECK (estado IN ('pendiente_pago', 'pago_rechazado', 'pendiente',
+                                      'imprimiendo', 'listo', 'entregado', 'cancelado')),
+    pagado          INTEGER NOT NULL DEFAULT 0,
     requiere_manual INTEGER NOT NULL DEFAULT 0,
     -- NULL para pedidos de /fotos: se cotizan manualmente
     precio_total    INTEGER,
     -- JSON con las opciones específicas del tipo de pedido (ver SPEC.md)
     opciones        TEXT NOT NULL,
     printer_id      INTEGER REFERENCES printers(id),
+    -- MercadoPago Checkout Pro
+    mp_preference_id TEXT,
+    mp_payment_id    TEXT,
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -95,9 +98,55 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 """
 
-# Migraciones incrementales futuras: lista de (version, sql). Se aplican en orden
+# Migraciones incrementales: lista de (version, sql). Se aplican en orden
 # y se registra la última versión aplicada en user_version de SQLite.
-MIGRACIONES: list[tuple[int, str]] = []
+
+# v1 — MercadoPago: nuevos estados (pendiente_pago, pago_rechazado) y columnas
+# mp_preference_id / mp_payment_id. SQLite no permite modificar un CHECK, así
+# que se recrea la tabla copiando los datos. Idempotente también en DBs recién
+# creadas (copia sobre el mismo esquema).
+_MIGRACION_1 = """
+PRAGMA foreign_keys = OFF;
+
+CREATE TABLE orders_v1 (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    token           TEXT NOT NULL UNIQUE,
+    tipo            TEXT NOT NULL CHECK (tipo IN ('fotocopias', 'fotos')),
+    customer_id     INTEGER NOT NULL REFERENCES customers(id),
+    estado          TEXT NOT NULL DEFAULT 'pendiente'
+                    CHECK (estado IN ('pendiente_pago', 'pago_rechazado', 'pendiente',
+                                      'imprimiendo', 'listo', 'entregado', 'cancelado')),
+    pagado          INTEGER NOT NULL DEFAULT 0,
+    requiere_manual INTEGER NOT NULL DEFAULT 0,
+    precio_total    INTEGER,
+    opciones        TEXT NOT NULL,
+    printer_id      INTEGER REFERENCES printers(id),
+    mp_preference_id TEXT,
+    mp_payment_id    TEXT,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+INSERT INTO orders_v1 (id, token, tipo, customer_id, estado, pagado,
+                       requiere_manual, precio_total, opciones, printer_id,
+                       created_at, updated_at)
+    SELECT id, token, tipo, customer_id, estado, pagado,
+           requiere_manual, precio_total, opciones, printer_id,
+           created_at, updated_at
+    FROM orders;
+
+DROP TABLE orders;
+ALTER TABLE orders_v1 RENAME TO orders;
+
+CREATE INDEX IF NOT EXISTS idx_orders_token ON orders(token);
+CREATE INDEX IF NOT EXISTS idx_orders_estado ON orders(estado);
+
+PRAGMA foreign_keys = ON;
+"""
+
+MIGRACIONES: list[tuple[int, str]] = [
+    (1, _MIGRACION_1),
+]
 
 # Mismas impresoras que muestra el mock de /admin
 SEED_PRINTERS = [

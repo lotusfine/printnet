@@ -1,13 +1,44 @@
 # PrintNet Backend — SPEC (contrato vivo)
 
 > Este archivo es el contrato que se lee y actualiza en cada sesión de trabajo.
-> Última actualización: 2026-07-08 · **Fase 1 completa y verificada de punta a punta.**
+> Última actualización: 2026-07-13 · **Pago real con MercadoPago Checkout Pro integrado y verificado (con MP mockeado).**
 
-## Fase actual: 1 — "Pedidos fantasma"
+## Fase actual: pagos reales (Checkout Pro)
 
-- **Pago**: todo pedido nace con `pagado = true` automáticamente. NO hay MercadoPago real ni webhook.
-- **Impresión**: simulada. `SimulatedDispatcher` registra en `dispatch_log` la intención ("se despacharía X a la impresora Y con opciones Z") sin tocar hardware.
-- **Fuera de alcance**: MercadoPago real, impresora física, WhatsApp.
+- **Pago**: integración real con MercadoPago Checkout Pro para pedidos de
+  /fotocopias. El pedido nace en `pendiente_pago`; el webhook confirma el pago
+  y recién ahí se dispara el flujo post-pago (triage, dispatch, email).
+  - **Modo fantasma de respaldo**: si `MP_ACCESS_TOKEN` no está configurada, el
+    sistema se comporta como Fase 1 (todo pedido nace pagado) — para desarrollo
+    local sin credenciales.
+  - **Pedidos de /fotos**: NO pasan por MercadoPago (no tienen precio online;
+    se cotizan y cobran en el local). Siguen el flujo de Fase 1.
+- **Impresión**: sigue simulada. `SimulatedDispatcher` registra en `dispatch_log`
+  la intención sin tocar hardware.
+- **Fuera de alcance**: reembolsos/cancelaciones/contracargos de MP, impresora
+  física, WhatsApp.
+
+## Flujo de pago real
+
+```
+cliente confirma pedido
+  → POST /orders crea el pedido en 'pendiente_pago' (pagado=0)
+  → backend crea la preferencia de Checkout Pro
+      items: monto de pricing.py · external_reference: token del pedido
+      back_urls: {FRONTEND}/estado/{token} · notification_url: {BASE_URL_PUBLICA}/webhooks/mercadopago
+  → responde init_point → el frontend redirige al cliente a MercadoPago
+cliente paga en MP
+  → MP notifica POST /webhooks/mercadopago (firma x-signature validada)
+  → backend consulta GET /v1/payments/{id} (nunca confía en el body)
+  → "approved" → order_flow.confirmar_pago(): EXACTAMENTE el flujo post-pago
+     de Fase 1 (pagado=1, triage, dispatch simulado, email "recibido")
+  → "rejected"/"cancelled" → estado 'pago_rechazado', sin disparar nada
+```
+
+La lógica post-pago vive en **`order_flow.confirmar_pago(conn, order_id)`**
+(extraída de la creación inline de Fase 1). Es **idempotente**: los reintentos
+de webhook de MP no despachan dos veces. La disparan el webhook (modo MP) o la
+creación del pedido (modo fantasma y pedidos /fotos).
 
 ## Ubicación y stack
 
@@ -23,11 +54,14 @@ backend-printnet/
 ├── database.py        # SQLite: esquema idempotente + migraciones + seed impresoras
 ├── models.py          # Pydantic: contrato de entrada (espeja el frontend)
 ├── pricing.py         # Tabla de precios HARDCODEADA (no editable por API)
+├── payments.py        # MercadoPago: preferencia, consulta de pago, firma HMAC
+├── order_flow.py      # confirmar_pago(): flujo post-pago único (triage+dispatch)
 ├── print_dispatch.py  # Interfaz abstracta de impresión + SimulatedDispatcher
 ├── notifications.py   # Email SMTP (env vars); simula si no hay config
 ├── routers/
-│   ├── orders.py      # POST /orders, GET /orders/status/{token}
-│   └── admin.py       # GET/PATCH /admin/orders, GET /admin/printers
+│   ├── orders.py      # POST /orders, POST /orders/paginas, GET /orders/status/{token}
+│   ├── admin.py       # GET/PATCH /admin/orders, GET /admin/printers
+│   └── webhooks.py    # POST /webhooks/mercadopago
 ├── SPEC.md            # este archivo
 ├── requirements.txt
 └── .env.example
@@ -64,7 +98,8 @@ Pendientes conocidos:
 ## Modelo de datos (SQLite)
 
 - **customers** `(id, nombre, telefono, email, created_at)` — upsert por email.
-- **orders** `(id, token UUID4 UNIQUE, tipo 'fotocopias'|'fotos', customer_id FK, estado, pagado=1, requiere_manual, precio_total NULL para fotos, opciones JSON, printer_id FK NULL, created_at, updated_at)`.
+- **orders** `(id, token UUID4 UNIQUE, tipo 'fotocopias'|'fotos', customer_id FK, estado, pagado=0, requiere_manual, precio_total NULL para fotos, opciones JSON, printer_id FK NULL, mp_preference_id, mp_payment_id, created_at, updated_at)`.
+  Migración v1 (`user_version=1`): recrea la tabla para sumar los estados de pago al CHECK y las columnas `mp_*` (SQLite no permite alterar CHECKs).
 - **files** `(id, order_id FK, filename_original, stored_path, content_type, size_bytes, paginas NULL si no es PDF)`. Los archivos viven en `uploads/{token}/`.
 - **printers** `(id, nombre, tipo 'laser'|'tinta', estado 'activa'|'error', error_tipo, hojas, consumible %)`. Seed: HP LaserJet 1 (error, tóner bajo) y Epson L3250 (activa) — espejo del mock de /admin.
 - **dispatch_log** `(id, order_id, printer_id, file_id, dispatcher, ok, detalle, created_at)`.
@@ -82,7 +117,21 @@ Migraciones: esquema idempotente (`CREATE TABLE IF NOT EXISTS`) + lista `MIGRACI
 
 ## Estados y transiciones
 
-`pendiente → imprimiendo → listo → entregado`, con `cancelado` alcanzable desde pendiente/imprimiendo/listo. `entregado` y `cancelado` son finales. Transición inválida → `409`.
+```
+pendiente_pago ──(webhook approved)──→ [confirmar_pago] → pendiente | imprimiendo
+      │                                                        │
+      ├──(webhook rejected)──→ pago_rechazado                  ▼
+      │                              │              imprimiendo → listo → entregado
+      └──(admin)──→ cancelado ←──────┘                    (admin, PATCH)
+```
+
+- `pendiente_pago` y `pago_rechazado` los maneja **solo el flujo de pago**
+  (webhook); el admin únicamente puede cancelarlos.
+- El resto igual que antes: `pendiente → imprimiendo → listo → entregado`,
+  `cancelado` desde pendiente/imprimiendo/listo. `entregado` y `cancelado`
+  finales. Transición inválida → `409`.
+- Los pedidos con `pagado=1` nunca vuelven atrás (un webhook de rechazo
+  posterior no "des-paga").
 
 Triage al crear (decisión de arquitectura 2):
 - **fotocopias**: dispatch simulado automático a la primera impresora `activa` → nace en `imprimiendo` (si no hay impresora activa queda `pendiente`). `requiere_manual = true` solo si trae terminaciones (complementa el dispatch, no lo reemplaza).
@@ -132,9 +181,24 @@ Errores: 422 (no es PDF / ilegible), 413 (>50 MB).
   "terminaciones": ["Corte"] }
 ```
 - Campo `files`: fotocopias = exactamente 1 PDF; fotos = ≥1 (imagen o PDF). Máx 50 MB c/u.
-- Respuesta: `{ id, token, tipo, estado, pagado: true, precio_total, requiere_manual, archivos: [nombres], paginas }`
-- Efectos: guarda archivos, cuenta páginas, cobra (fotocopias), despacha (fotocopias), email "recibido" en background.
-- Errores: 422 validación (formato `[{campo, error}]`), 413 archivo grande.
+- Respuesta: `{ id, token, tipo, estado, pagado, init_point, precio_total, requiere_manual, archivos: [nombres], paginas }`
+  - **Modo MercadoPago** (fotocopias con `MP_ACCESS_TOKEN` configurada): `estado: "pendiente_pago"`, `pagado: false`, `init_point` = URL de Checkout Pro **a la que el frontend debe redirigir**. El dispatch y el email quedan para el webhook.
+  - **Modo fantasma o pedido /fotos**: `estado` final directo (imprimiendo/pendiente), `pagado: true`, `init_point: null` — igual que Fase 1.
+- Errores: 422 validación (formato `[{campo, error}]`), 413 archivo grande, 502 si MercadoPago no responde al crear la preferencia.
+
+### `POST /webhooks/mercadopago` → 200
+Notificaciones de pago de MercadoPago (server-to-server).
+1. Valida la firma del header `x-signature` (HMAC-SHA256 con `MP_WEBHOOK_SECRET`
+   sobre el template `id:{data.id};request-id:{x-request-id};ts:{ts};`).
+   Firma inválida o secret sin configurar → **401** + log del intento.
+2. Ignora (200) notificaciones que no sean `type=payment`.
+3. Consulta `GET /v1/payments/{data.id}` con `MP_ACCESS_TOKEN` — nunca confía
+   en el body de la notificación. Si MP no responde → 500 (MP reintenta).
+4. Busca el pedido por `external_reference` (= token interno):
+   `approved` → `confirmar_pago()` (idempotente) + email "recibido";
+   `rejected`/`cancelled` → `pago_rechazado` (solo si aún no estaba pagado);
+   otros estados → sin acción.
+5. Responde 200 en menos de 1s (límite de MP: 22s).
 
 ### `GET /orders/status/{token}` → 200 (público, sin login)
 `{ token, tipo, estado, precio_total, archivos, creado, actualizado }` · 404 si no existe. Token = UUID v4, no adivinable.
@@ -160,6 +224,46 @@ Config por env (ver `.env.example`): `PRINTNET_SMTP_HOST/PORT/USER/PASSWORD/FROM
 ## print_dispatch (interfaz abstracta)
 
 `PrintDispatcher.dispatch(printer_nombre, file_path, options) → DispatchResult(ok, detalle)`. Fase 1: `SimulatedDispatcher`. Futuras (sin tocar el resto del sistema): `SumatraDispatcher` (Windows, SumatraPDF CLI) y `CupsDispatcher` (Linux/Pi, `lp`). Selección por env `PRINTNET_DISPATCH` (default `simulated`). Atajo funcional: `dispatch_print(...)`.
+
+## Variables de entorno de MercadoPago
+
+Ver `.env.example`. **Nunca commitear ni loggear los valores reales.**
+
+| Variable | Qué es |
+|---|---|
+| `MP_ACCESS_TOKEN` | Token privado (empezar con credenciales de prueba `TEST-...`). Sin ella → modo fantasma. |
+| `MP_WEBHOOK_SECRET` | Clave secreta del webhook (se genera en el panel de MP al configurar la notificación). |
+| `BASE_URL_PUBLICA` | URL pública del backend (Cloudflare Tunnel en dev); arma la `notification_url` en runtime. |
+| `PRINTNET_FRONTEND_URL` | URL del frontend para las `back_urls` (`/estado/{token}`). Default `http://localhost:5173`. |
+
+## Cómo probar con credenciales de prueba de MercadoPago
+
+1. En https://www.mercadopago.com.ar/developers crear una aplicación y, en
+   "Cuentas de prueba", crear **dos cuentas test**: una vendedora y una compradora.
+2. Con la cuenta vendedora, copiar el **Access Token de prueba** (`TEST-...`)
+   → `MP_ACCESS_TOKEN`.
+3. Exponer el backend local con Cloudflare Tunnel:
+   `cloudflared tunnel --url http://localhost:8000` → copiar la URL a `BASE_URL_PUBLICA`.
+4. En el panel de la aplicación → Webhooks, configurar la URL
+   `{BASE_URL_PUBLICA}/webhooks/mercadopago` (evento: Pagos) y copiar la
+   **clave secreta** que genera MP → `MP_WEBHOOK_SECRET`.
+5. Levantar el backend con esas env vars y crear un pedido de /fotocopias:
+   la respuesta trae `init_point`. Abrirlo, loguearse con la **cuenta
+   compradora de prueba** y pagar con las tarjetas de test de MP
+   (ej. Mastercard `5031 7557 3453 0604`, cualquier vencimiento futuro,
+   CVV `123`, nombre `APRO` para aprobar / `OTHE` para rechazar).
+6. Verificar: el webhook llega (log del server), el pedido pasa a
+   `imprimiendo` (`GET /orders/status/{token}`), hay fila en `dispatch_log`
+   y el email "recibido" queda en `notifications`.
+
+> El flujo completo también está verificado sin credenciales con la API de MP
+> mockeada (19 chequeos: firma inválida→401, aprobado→dispatch+email,
+> idempotencia de reintentos, rechazo→pago_rechazado, referencia inexistente).
+
+### Pendientes de frontend para cerrar el circuito
+- Redirigir a `init_point` cuando la respuesta de `POST /orders` lo traiga.
+- Crear la página `/estado/{token}` (destino de las `back_urls`).
+- Badges/estilos en /admin para `pendiente_pago` y `pago_rechazado`.
 
 ## Cómo correr y probar localmente
 
@@ -196,5 +300,7 @@ curl -s http://localhost:8000/orders/status/<TOKEN>
 ## Roadmap (fases futuras)
 
 - ~~Fase 2: conectar el frontend~~ ✔ hecho (queda: auth para `/admin/*`).
-- Fase 3: MercadoPago real (webhook), impresión real (CUPS en la Pi / SumatraPDF en Windows).
+- ~~Fase 3a: MercadoPago real (Checkout Pro + webhook)~~ ✔ hecho (quedan los
+  pendientes de frontend listados arriba; reembolsos/contracargos fuera de alcance).
+- Fase 3b: impresión real (CUPS en la Pi / SumatraPDF en Windows).
 - Fase 4: WhatsApp, endpoints de mutación de impresoras (hoy el sidebar usa estado local).

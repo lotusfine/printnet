@@ -102,8 +102,16 @@ class PedidoFotos(BaseModel):
 
 Pedido = Annotated[Union[PedidoFotocopias, PedidoFotos], Field(discriminator="tipo")]
 
-ESTADOS = ("pendiente", "imprimiendo", "listo", "entregado", "cancelado")
+ESTADOS = (
+    "pendiente_pago", "pago_rechazado",
+    "pendiente", "imprimiendo", "listo", "entregado", "cancelado",
+)
 
 
 class CambioEstado(BaseModel):
-    estado: Literal["pendiente", "imprimiendo", "listo", "entregado", "cancelado"]
+    # pendiente_pago y pagado se manejan por el flujo de pago (webhook), no
+    # por el admin; solo puede cancelar pedidos en esos estados.
+    estado: Literal[
+        "pendiente_pago", "pago_rechazado",
+        "pendiente", "imprimiendo", "listo", "entregado", "cancelado",
+    ]

@@ -19,10 +19,11 @@ from fastapi import (
 from pydantic import TypeAdapter, ValidationError
 
 import notifications
+import payments
 import pricing
 from database import UPLOADS_DIR, get_db
 from models import Pedido, PedidoFotocopias, PedidoFotos
-from print_dispatch import get_dispatcher
+from order_flow import confirmar_pago
 
 logger = logging.getLogger("printnet.orders")
 router = APIRouter()
@@ -208,73 +209,67 @@ def crear_pedido(
             "terminaciones": pedido.terminaciones,
         }
 
-    # 5) Persistir cliente + pedido + archivos
+    # 5) Persistir cliente + pedido + archivos. El pedido nace SIN pagar,
+    #    en 'pendiente_pago'; el pago define el paso 6.
     customer_id = _upsert_customer(db, pedido.contacto)
     cur = db.execute(
         """INSERT INTO orders (token, tipo, customer_id, estado, pagado,
                                requiere_manual, precio_total, opciones)
-           VALUES (?, ?, ?, 'pendiente', 1, ?, ?, ?)""",
+           VALUES (?, ?, ?, 'pendiente_pago', 0, ?, ?, ?)""",
         (token, pedido.tipo, customer_id, int(requiere_manual), precio_total,
          json.dumps(opciones_json)),
     )
     order_id = cur.lastrowid
 
-    file_ids = []
     for a in archivos:
-        fcur = db.execute(
+        db.execute(
             """INSERT INTO files (order_id, filename_original, stored_path,
                                   content_type, size_bytes, paginas)
                VALUES (?, ?, ?, ?, ?, ?)""",
             (order_id, a["filename_original"], a["stored_path"],
              a["content_type"], a["size_bytes"], a["paginas"]),
         )
-        file_ids.append(fcur.lastrowid)
 
-    # 6) Dispatch automático SOLO para fotocopias (decisión de arquitectura 2)
-    estado = "pendiente"
-    printer_id = None
-    if isinstance(pedido, PedidoFotocopias):
-        printer = db.execute(
-            "SELECT id, nombre FROM printers WHERE estado = 'activa' ORDER BY id LIMIT 1"
-        ).fetchone()
-        if printer:
-            dispatcher = get_dispatcher()
-            resultado = dispatcher.dispatch(
-                printer["nombre"], archivos[0]["stored_path"], opciones_json
+    # 6) Pago
+    init_point = None
+    if isinstance(pedido, PedidoFotocopias) and payments.modo_mercadopago():
+        # MercadoPago real (Checkout Pro): el pedido queda en pendiente_pago
+        # hasta que el webhook confirme el pago aprobado. El triage/dispatch
+        # y el email "recibido" se disparan recién ahí (order_flow.confirmar_pago).
+        try:
+            pref = payments.crear_preferencia(
+                order_id=order_id,
+                token=token,
+                titulo=f"PrintNet — Pedido #{order_id}",
+                monto=precio_total,
             )
-            db.execute(
-                """INSERT INTO dispatch_log (order_id, printer_id, file_id,
-                                             dispatcher, ok, detalle)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (order_id, printer["id"], file_ids[0], dispatcher.nombre,
-                 int(resultado.ok), resultado.detalle),
-            )
-            if resultado.ok:
-                estado = "imprimiendo"
-                printer_id = printer["id"]
-        else:
-            logger.warning(
-                "Pedido %s sin despachar: no hay impresoras activas", order_id
-            )
-
-    db.execute(
-        "UPDATE orders SET estado = ?, printer_id = ?, updated_at = datetime('now') WHERE id = ?",
-        (estado, printer_id, order_id),
-    )
-
-    # Commit explícito ANTES de responder: libera el lock de escritura para que
-    # la tarea de fondo (email) pueda escribir en notifications sin bloquearse.
-    db.commit()
-
-    # 7) Email "pedido recibido" en background (no bloquea la respuesta)
-    background.add_task(notifications.notificar_pedido_recibido, order_id)
+        except Exception as exc:  # noqa: BLE001 — MP caído no debe dejar basura
+            logger.error("No se pudo crear la preferencia de MercadoPago: %s", exc)
+            raise HTTPException(502, "no se pudo iniciar el pago con MercadoPago")
+        db.execute(
+            "UPDATE orders SET mp_preference_id = ? WHERE id = ?",
+            (pref["preference_id"], order_id),
+        )
+        estado, pagado = "pendiente_pago", False
+        init_point = pref["init_point"]
+        # Commit explícito antes de responder (libera el lock de escritura)
+        db.commit()
+    else:
+        # Modo fantasma (sin MP_ACCESS_TOKEN configurado) o pedido de /fotos
+        # (sin precio online: se cotiza y cobra en el local) → mismo flujo
+        # que Fase 1: pago inmediato + triage + email.
+        estado = confirmar_pago(db, order_id)
+        pagado = True
+        db.commit()
+        background.add_task(notifications.notificar_pedido_recibido, order_id)
 
     return {
         "id": order_id,
         "token": token,
         "tipo": pedido.tipo,
         "estado": estado,
-        "pagado": True,
+        "pagado": pagado,
+        "init_point": init_point,
         "precio_total": precio_total,
         "requiere_manual": requiere_manual,
         "archivos": [a["filename_original"] for a in archivos],

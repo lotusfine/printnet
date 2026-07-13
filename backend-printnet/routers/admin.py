@@ -22,8 +22,12 @@ from models import ESTADOS, CambioEstado
 
 router = APIRouter(prefix="/admin")
 
-# Transiciones de estado permitidas
+# Transiciones de estado permitidas. Las transiciones DE pago (pendiente_pago
+# → pagado/pago_rechazado) las maneja exclusivamente el webhook de MercadoPago;
+# el admin solo puede cancelar pedidos atascados en esos estados.
 TRANSICIONES = {
+    "pendiente_pago": {"cancelado"},
+    "pago_rechazado": {"cancelado"},
     "pendiente": {"imprimiendo", "listo", "cancelado"},
     "imprimiendo": {"listo", "cancelado"},
     "listo": {"entregado", "cancelado"},
