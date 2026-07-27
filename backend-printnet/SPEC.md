@@ -62,10 +62,31 @@ backend-printnet/
 │   ├── orders.py      # POST /orders, POST /orders/paginas, GET /orders/status/{token}
 │   ├── admin.py       # GET/PATCH /admin/orders, GET /admin/printers
 │   └── webhooks.py    # POST /webhooks/mercadopago
+├── run_server.py      # entrypoint del ejecutable congelado (uvicorn embebido)
+├── printnet.spec      # PyInstaller: build del .exe standalone
+├── deploy/            # instalación permanente en Windows (ver deploy/README.md)
+│   ├── install-services.ps1    # registro de servicios con NSSM
+│   ├── uninstall-services.ps1
+│   ├── printnet-installer.iss  # instalador Inno Setup
+│   └── README.md               # build + config manual de Windows
 ├── SPEC.md            # este archivo
 ├── requirements.txt
 └── .env.example
 ```
+
+### Despliegue en la notebook del local (Windows)
+
+El backend se empaqueta con PyInstaller en un `.exe` standalone y corre como
+servicio de Windows junto a `cloudflared` (túnel nombrado `printnet`), ambos
+con arranque y reinicio automáticos. Paso a paso en **`deploy/README.md`**.
+
+Dos detalles del diseño que conviene no romper:
+- `database.py::_base_dir()` y `main.py` resuelven `.env`, `printnet.db` y
+  `uploads/` **junto al ejecutable** cuando corre congelado (`sys.frozen`), no
+  en el temporal de extracción de PyInstaller — que se borra al cerrar.
+- Los servicios corren como `LocalSystem`, cuyo perfil NO es el del usuario:
+  por eso las credenciales del túnel se copian a la carpeta de instalación y
+  se pasan con `--config` y `TUNNEL_ORIGIN_CERT` absolutos.
 
 ## Contrato con el frontend (extraído del código real)
 

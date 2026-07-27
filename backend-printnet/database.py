@@ -9,9 +9,22 @@ en MIGRACIONES.
 
 import os
 import sqlite3
+import sys
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
+
+def _base_dir() -> Path:
+    """Directorio base de datos/uploads/.env.
+
+    Congelado con PyInstaller: junto al ejecutable (NO en _MEIPASS, el
+    directorio temporal de extracción, que se borra al cerrar el proceso).
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+BASE_DIR = _base_dir()
 DB_PATH = Path(os.environ.get("PRINTNET_DB", BASE_DIR / "printnet.db"))
 UPLOADS_DIR = Path(os.environ.get("PRINTNET_UPLOADS", BASE_DIR / "uploads"))
 

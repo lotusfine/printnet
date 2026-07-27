@@ -4,3 +4,10 @@ __pycache__/
 .env
 printnet.db
 uploads/
+
+# Instalador Windows: payload con credenciales y binarios
+deploy/payload/
+deploy/Output/
+build/
+dist/
+*.exe
