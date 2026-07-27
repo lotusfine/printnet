@@ -15,6 +15,88 @@ Cloudflare  ──túnel 'printnet'──►  notebook
 
 ---
 
+## Parte 0 — Crear el túnel nombrado `printnet` (PREREQUISITO)
+
+> Salteá esta parte solo si `cloudflared tunnel list` ya muestra un túnel
+> llamado `printnet`.
+
+Hay dos tipos de túnel y la diferencia importa mucho acá:
+
+| | Túnel rápido (`--url`) | Túnel nombrado (`tunnel run`) |
+|---|---|---|
+| URL | `algo-random.trycloudflare.com` | tu dominio, fijo |
+| Al reiniciar | **cambia la URL** | sigue igual |
+| Necesita dominio | no | **sí** |
+| Sirve para el local | no (habría que reconfigurar Vercel y el webhook de MP cada vez) | sí |
+
+Para producción hace falta el **nombrado**, y eso exige un dominio propio
+administrado por Cloudflare.
+
+### 0.1 Dominio en Cloudflare
+
+1. Comprar un dominio (Cloudflare Registrar, NIC.ar, Namecheap, el que sea).
+2. Crear cuenta gratis en <https://dash.cloudflare.com> → **Add a site** →
+   escribir el dominio → plan **Free**.
+3. Cloudflare te da dos nameservers; cargalos en el panel de donde compraste el
+   dominio, reemplazando los que tenga. La propagación tarda de minutos a
+   ~24 hs; el panel avisa cuando el dominio queda **Active**.
+
+### 0.2 Crear el túnel (en la notebook, PowerShell)
+
+```powershell
+# 1. Autenticar cloudflared con tu cuenta (abre el navegador; elegí el dominio)
+cloudflared tunnel login
+#    -> genera C:\Users\<vos>\.cloudflared\cert.pem
+
+# 2. Crear el túnel
+cloudflared tunnel create printnet
+#    -> genera C:\Users\<vos>\.cloudflared\<UUID>.json  (anotá el UUID)
+
+# 3. Apuntar un subdominio al túnel (elegí el que quieras)
+cloudflared tunnel route dns printnet api.tudominio.com
+
+# 4. Confirmar
+cloudflared tunnel list
+```
+
+### 0.3 Probarlo a mano antes de instalar nada
+
+Creá `C:\Users\<vos>\.cloudflared\config.yml`:
+
+```yaml
+tunnel: printnet
+credentials-file: C:\Users\<vos>\.cloudflared\<UUID>.json
+
+ingress:
+  - hostname: api.tudominio.com
+    service: http://127.0.0.1:8000
+  - service: http_status:404
+```
+
+Con el backend corriendo en el puerto 8000, en otra terminal:
+
+```powershell
+cloudflared tunnel run printnet
+```
+
+Abrí `https://api.tudominio.com/docs`. Si carga, el túnel está listo y ya podés
+seguir con la Parte 1. Cortá con `Ctrl+C` (el instalador lo va a dejar como
+servicio).
+
+### 0.4 Actualizar lo que apuntaba al túnel viejo
+
+Al pasar del túnel rápido al nombrado cambia la URL pública, así que hay que
+actualizar **tres lugares** (esta es la última vez: el dominio ya no cambia más):
+
+1. **`.env`** → `BASE_URL_PUBLICA=https://api.tudominio.com`
+2. **Vercel** → variable `VITE_PRINTNET_API` con la URL nueva + **redeploy**
+   (es variable de build: sin redeploy el sitio sigue apuntando al túnel viejo)
+3. **MercadoPago** → panel de la aplicación → Webhooks → URL
+   `https://api.tudominio.com/webhooks/mercadopago`. Si MP regenera la firma
+   secreta, actualizá también `MP_WEBHOOK_SECRET` en el `.env`.
+
+---
+
 ## Parte 1 — Compilar el .exe (una sola vez, EN WINDOWS)
 
 PyInstaller **no cross-compila**: el `.exe` hay que generarlo en la notebook
