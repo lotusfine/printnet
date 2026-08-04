@@ -160,16 +160,34 @@ Triage al crear (decisión de arquitectura 2):
 
 ## Precios (`pricing.py` — hardcodeado, sin endpoint de edición)
 
-```
-byn $10/pág · color $25/pág · doble faz: ceil(pág/2) hojas · A3: ×1.5
-total = round(hojas × copias × $ × mult) [+ anillado]
+**Tramos por cantidad, PLANOS (no marginales)**: el precio del tramo en el que
+cae la cantidad total de la línea se aplica a *todas* las unidades. 300 copias
+B&N simple = 300 × $130 (no 19×200 + 80×150 + 201×130).
 
-Terminaciones:
-  Anillado (solo /fotocopias, automático): $2.000 por copia hasta 100 hojas,
-    $3.500 por copia con más de 100 hojas
-  Plastificado: $1.400 hoja A4 · $700 media hoja   (referencia, /fotos a cotizar)
-  Corte: $500 hoja A4                              (referencia, /fotos a cotizar)
-```
+| Combinación | Tramos (unidad → $ c/u) |
+|---|---|
+| B&N simple | 1–19 → $200 · 20–99 → $150 · 100+ → $130 |
+| B&N doble | 1–49 → $200 · 50+ → $150 |
+| Color simple | 1–19 → $400 · 20+ → $300 |
+| Color doble | 1–19 → $600 · 20+ → $450 |
+
+- **Unidad**: copias en simple faz, **hojas físicas** en doble faz
+  (`hojas = ceil(carillas / 2)`; el tramo y el total se calculan sobre hojas,
+  no sobre carillas). Ej.: 96 págs doble faz = 48 hojas → $9.600.
+- **Ámbito del tramo**: la línea completa, o sea `hojas_por_copia × copias`.
+  2 copias de 10 págs simple = 20 unidades → cae en el tramo 20–99.
+- **A3**: recargo del 50% sobre el total (dimensión aparte de los tramos).
+- **Terminaciones**: Anillado (solo /fotocopias, automático) $2.000 por copia
+  hasta 100 hojas, $3.500 con más de 100 — se suma al total.
+  Plastificado ($1.400 A4 / $700 media hoja) y Corte ($500 A4) quedan como
+  referencia: los pedidos de /fotos se cotizan a mano.
+
+Fuera del motor de precios (se cobran en el local): escaneo $100, edición
+$2.000, fotocopia DNI $400, foto carnet $2.000.
+
+Tests: `.venv/bin/python test_pricing.py` — cubre los bordes de cada tramo
+(19/20, 49/50, 99/100, 19/20 en color), los ejemplos de la spec de precios,
+páginas impares en doble faz y el carácter plano del bracket.
 Las páginas se cuentan del PDF real con pypdf; el rango se valida contra ese total (la validación que el frontend delegó al backend). PDF ilegible → 422.
 
 La fórmula está **espejada** en `frontend/src/components/fotocopias/PrintOptions.jsx`

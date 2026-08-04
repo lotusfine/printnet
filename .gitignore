@@ -16,3 +16,5 @@ backend/.project
 .idea/
 *.swp
 *.log
+.vercel
+.env*

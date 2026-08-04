@@ -1,8 +1,22 @@
-// Espejo de backend-printnet/pricing.py — mantener sincronizados
-const PRICE = { byn: 10, color: 25 };
+// Espejo de backend-printnet/pricing.py — mantener sincronizados.
+// Tramos por cantidad, PLANOS (no marginales): el precio del tramo en el que
+// cae la cantidad total de la línea se aplica a todas las unidades.
+// Cada tramo es [tope incluido (null = en adelante), precio unitario].
+const TRAMOS = {
+  'byn|simple': [[19, 200], [99, 150], [null, 130]],
+  'byn|doble': [[49, 200], [null, 150]],
+  'color|simple': [[19, 400], [null, 300]],
+  'color|doble': [[19, 600], [null, 450]],
+};
 const A3_SURCHARGE = 1.5;
 const ANILLADO_HASTA_100 = 2000;
 const ANILLADO_MAS_100 = 3500;
+
+const precioUnitario = (color, caras, cantidad) => {
+  const tramos = TRAMOS[`${color}|${caras}`];
+  const tramo = tramos.find(([tope]) => tope === null || cantidad <= tope);
+  return tramo[1];
+};
 
 const PrintOptions = ({ pages, options, onChange }) => {
   const set = (key, value) => onChange({ ...options, [key]: value });
@@ -20,8 +34,8 @@ const PrintOptions = ({ pages, options, onChange }) => {
           <legend className="mb-2 text-xs font-bold uppercase tracking-widest text-stone-500">Color</legend>
           <div className="flex gap-3">
             {[
-              { value: 'byn', label: 'B/N', sub: '$10/pág' },
-              { value: 'color', label: 'Color', sub: '$25/pág' },
+              { value: 'byn', label: 'B/N', sub: 'desde $130' },
+              { value: 'color', label: 'Color', sub: 'desde $300' },
             ].map(({ value, label, sub }) => (
               <button
                 key={value}
@@ -146,6 +160,13 @@ const PrintOptions = ({ pages, options, onChange }) => {
           <p className="text-[10px] text-stone-400 mt-1 text-right">
             {pages} págs · {options.caras === 'doble' ? `${Math.ceil(pages / 2)} hojas (doble faz)` : `${pages} hojas`} · {options.copias} cop. · {options.tamano}
           </p>
+          <p className="text-[10px] text-stone-400 text-right">
+            {(() => {
+              const hojas = options.caras === 'doble' ? Math.ceil(pages / 2) : pages;
+              const total = hojas * options.copias;
+              return `${total} ${options.caras === 'doble' ? 'hojas' : 'copias'} × $${precioUnitario(options.color, options.caras, total).toLocaleString('es-AR')} c/u`;
+            })()}
+          </p>
         </div>
       </div>
     </article>
@@ -153,12 +174,17 @@ const PrintOptions = ({ pages, options, onChange }) => {
 };
 
 export const calcPrice = (pages, options) => {
-  const pricePer = options.color === 'color' ? PRICE.color : PRICE.byn;
-  const sheets = options.caras === 'doble' ? Math.ceil(pages / 2) : pages;
+  // Hojas físicas de UNA copia (en doble faz entran 2 carillas por hoja)
+  const sheetsPerCopy = options.caras === 'doble' ? Math.ceil(pages / 2) : pages;
+  // El tramo se evalúa sobre el total de la línea, no sobre una sola copia
+  const totalUnits = sheetsPerCopy * options.copias;
+
+  const unitPrice = precioUnitario(options.color, options.caras, totalUnits);
   const sizeMultiplier = options.tamano === 'A3' ? A3_SURCHARGE : 1;
-  let total = Math.round(sheets * options.copias * pricePer * sizeMultiplier);
+  let total = Math.round(totalUnits * unitPrice * sizeMultiplier);
+
   if (options.anillado) {
-    total += options.copias * (sheets <= 100 ? ANILLADO_HASTA_100 : ANILLADO_MAS_100);
+    total += options.copias * (sheetsPerCopy <= 100 ? ANILLADO_HASTA_100 : ANILLADO_MAS_100);
   }
   return total;
 };
