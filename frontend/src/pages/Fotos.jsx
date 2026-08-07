@@ -5,6 +5,8 @@ import FilesUpload from '../components/fotos/FilesUpload';
 import MaterialSelect, { MATERIALES, FORMATOS } from '../components/fotos/MaterialSelect';
 import FinishOptions from '../components/fotos/FinishOptions';
 import { crearPedido } from '../api';
+import { PEDIDOS_HABILITADOS } from '../config';
+import PedidosDeshabilitados from '../components/PedidosDeshabilitados';
 
 let nextFileId = 1;
 
@@ -125,7 +127,9 @@ const Fotos = () => {
         </div>
       </header>
 
-      <div className="grid w-full gap-8 md:gap-10 md:grid-cols-2">
+      {!PEDIDOS_HABILITADOS && <PedidosDeshabilitados accent="lila" />}
+
+      <div className={`grid w-full gap-8 md:gap-10 md:grid-cols-2 ${PEDIDOS_HABILITADOS ? '' : 'hidden'}`}>
         <ContactForm
           contacto={contacto}
           errors={errors}
@@ -153,7 +157,7 @@ const Fotos = () => {
         />
       </div>
 
-      <div className="flex flex-col items-center gap-3">
+      <div className={`flex flex-col items-center gap-3 ${PEDIDOS_HABILITADOS ? '' : 'hidden'}`}>
         <button
           type="button"
           onClick={handleSubmit}

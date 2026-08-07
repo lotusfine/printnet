@@ -1,0 +1,38 @@
+# ---------------------------------------------------------------------------
+# React Router: cualquier ruta que no sea un archivo real va a index.html.
+# Sin esto, entrar directo a /fotocopias, /admin o /estado/{token} da 404
+# (importante: MercadoPago devuelve al cliente a un link directo).
+# ---------------------------------------------------------------------------
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+
+    # Si el archivo o la carpeta existen, se sirven tal cual
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # Todo lo demás lo resuelve React Router del lado del navegador
+    RewriteRule . /index.html [L]
+</IfModule>
+
+# ---------------------------------------------------------------------------
+# Caché: index.html y config.js NUNCA se cachean. Si se cachearan, después de
+# cada actualización los visitantes seguirían viendo la versión anterior.
+# Los archivos de assets/ llevan un hash en el nombre, así que cambian de
+# nombre en cada build y pueden cachearse sin riesgo.
+# ---------------------------------------------------------------------------
+<IfModule mod_headers.c>
+    <FilesMatch "^(index\.html|config\.js)$">
+        Header set Cache-Control "no-cache, no-store, must-revalidate"
+        Header set Pragma "no-cache"
+        Header set Expires 0
+    </FilesMatch>
+</IfModule>
+
+# php -- BEGIN cPanel-generated handler, do not edit
+# Set the “ea-php83” package as the default “PHP” programming language.
+<IfModule mime_module>
+  AddHandler application/x-httpd-ea-php83___lsphp .php .php8 .phtml
+</IfModule>
+# php -- END cPanel-generated handler, do not edit

@@ -10,4 +10,15 @@ export const API_URL =
 
 /** Backend de PrintNet: pedidos, precios y pagos. */
 export const PRINTNET_API =
-  runtime.PRINTNET_API || import.meta.env.VITE_PRINTNET_API || 'http://localhost:8000';
+  runtime.PRINTNET_API ||
+  import.meta.env.VITE_PRINTNET_API ||
+  // En desarrollo asumimos el backend local; en producción, sin configurar,
+  // queda vacío a propósito (ver PEDIDOS_HABILITADOS).
+  (import.meta.env.DEV ? 'http://localhost:8000' : '');
+
+/**
+ * Si no hay backend de pedidos configurado, las páginas de pedidos muestran
+ * un aviso en vez del formulario. Evita que un cliente cargue un archivo y
+ * se choque con un error de red al intentar pagar.
+ */
+export const PEDIDOS_HABILITADOS = Boolean(PRINTNET_API);

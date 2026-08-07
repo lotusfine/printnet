@@ -5,6 +5,8 @@ import FileUpload, { validateRango } from '../components/fotocopias/FileUpload';
 import PrintOptions from '../components/fotocopias/PrintOptions';
 import OrderSummary from '../components/fotocopias/OrderSummary';
 import { crearPedido } from '../api';
+import { PEDIDOS_HABILITADOS } from '../config';
+import PedidosDeshabilitados from '../components/PedidosDeshabilitados';
 
 const DEFAULT_OPTIONS = {
   color: 'byn',
@@ -109,7 +111,9 @@ const Fotocopias = () => {
         </div>
       </header>
 
-      <div className="grid w-full gap-8 md:gap-10 md:grid-cols-2">
+      {!PEDIDOS_HABILITADOS && <PedidosDeshabilitados accent="amber" />}
+
+      <div className={`grid w-full gap-8 md:gap-10 md:grid-cols-2 ${PEDIDOS_HABILITADOS ? '' : 'hidden'}`}>
         <FileUpload
           onFileChange={(info) => { setFileInfo(info); setEnvio({ estado: 'idle' }); }}
           pageRange={rango}
