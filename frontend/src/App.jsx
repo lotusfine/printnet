@@ -10,6 +10,7 @@ import Admin from './pages/Admin';
 
 import logo from './assets/logo-glaxara.jpg';
 import logoWsp from './assets/logo-wsp.png';
+import { API_URL } from './config';
 
 // Shell del sitio público (header + main + footer + WhatsApp)
 const SiteShell = ({ infoGeneral, novedades }) => (
@@ -79,10 +80,12 @@ function App() {
   const [novedades, setNovedades] = useState([]);
 
   useEffect(() => {
-    const apiUrl = import.meta.env.VITE_API_URL;
+    // Sin backend institucional configurado no tiene sentido pedir nada:
+    // la URL quedaría en "undefined/informacion" y llenaría la consola de errores.
+    if (!API_URL) return;
     Promise.all([
-      fetch(`${apiUrl}/informacion`).then(res => res.json()),
-      fetch(`${apiUrl}/novedades`).then(res => res.json()),
+      fetch(`${API_URL}/informacion`).then(res => res.json()),
+      fetch(`${API_URL}/novedades`).then(res => res.json()),
     ])
       .then(([dataInfo, dataNov]) => {
         setInfoGeneral(dataInfo);

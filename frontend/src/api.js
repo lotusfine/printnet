@@ -1,7 +1,7 @@
 // Cliente del backend PrintNet (backend-printnet, FastAPI).
-// En local no hace falta configurar nada: apunta a http://localhost:8000.
-export const PRINTNET_API =
-  import.meta.env.VITE_PRINTNET_API ?? 'http://localhost:8000';
+// La URL se resuelve en config.js: editable en el servidor sin recompilar.
+export { PRINTNET_API } from './config';
+import { PRINTNET_API } from './config';
 
 const formatearError = (body) => {
   const d = body?.detail;
