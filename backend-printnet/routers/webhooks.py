@@ -16,6 +16,7 @@ import logging
 import os
 import sqlite3
 
+import requests
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 
 import notifications
@@ -65,9 +66,22 @@ async def webhook_mercadopago(
     # Estado real del pago según MercadoPago (nunca confiar en el body)
     try:
         pago = payments.obtener_pago(data_id)
-    except Exception as exc:  # noqa: BLE001
+    except requests.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else None
+        if status in (400, 404):
+            # El pago no existe (o el id es inválido): es un error permanente,
+            # reintentar no lo va a cambiar. Se responde 200 para que MP deje
+            # de reenviar la notificación. Pasa con las pruebas del simulador.
+            logger.warning(
+                "Webhook MP: el pago %s no existe en MercadoPago (%s); se ignora",
+                data_id, status,
+            )
+            return {"ok": True, "ignorado": "pago inexistente"}
         logger.error("No se pudo consultar el pago %s en MP: %s", data_id, exc)
-        # 500 para que MercadoPago reintente la notificación
+        # Error transitorio de MP: 500 para que reintente
+        raise HTTPException(500, "no se pudo consultar el pago")
+    except Exception as exc:  # noqa: BLE001 — red caída, timeout, etc.
+        logger.error("No se pudo consultar el pago %s en MP: %s", data_id, exc)
         raise HTTPException(500, "no se pudo consultar el pago")
 
     referencia = pago.get("external_reference") or ""

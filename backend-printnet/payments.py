@@ -61,8 +61,18 @@ def crear_preferencia(order_id: int, token: str, titulo: str, monto: int) -> dic
             "failure": estado_url,
             "pending": estado_url,
         },
-        "auto_return": "approved",
     }
+
+    # auto_return exige que back_urls.success sea una URL pública: con
+    # localhost MercadoPago responde "auto_return invalid". En desarrollo se
+    # omite y el cliente vuelve con el botón de MP en vez de automáticamente.
+    if estado_url.startswith("https://"):
+        payload["auto_return"] = "approved"
+    else:
+        logger.warning(
+            "PRINTNET_FRONTEND_URL no es https (%s): la preferencia se crea "
+            "sin auto_return", frontend
+        )
 
     base_publica = os.environ.get("BASE_URL_PUBLICA", "").rstrip("/")
     if base_publica:
@@ -79,7 +89,14 @@ def crear_preferencia(order_id: int, token: str, titulo: str, monto: int) -> dic
         headers={"Authorization": f"Bearer {_access_token()}"},
         timeout=20,
     )
-    resp.raise_for_status()
+    if not resp.ok:
+        # El cuerpo de la respuesta trae el motivo real del rechazo; sin esto
+        # el log solo dice "400 Bad Request" y no se puede diagnosticar.
+        logger.error(
+            "MercadoPago rechazó la preferencia (%s): %s",
+            resp.status_code, resp.text[:500],
+        )
+        resp.raise_for_status()
     data = resp.json()
     return {
         "preference_id": data["id"],
