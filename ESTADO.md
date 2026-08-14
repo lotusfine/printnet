@@ -84,11 +84,12 @@ Hasta ahora se venían usando **túneles rápidos** (`trycloudflare.com`), cuya
 URL **cambia en cada arranque** — eso obligaba a reconfigurar tres lugares cada
 vez. Con el túnel nombrado la dirección queda fija para siempre.
 
-### 2. La impresión: anda, falta probar el tamaño de papel
+### 2. La impresión: ✅ probada contra la Ricoh y funcionando
 
-**Probado contra la Ricoh el 2026-08-14 y funciona.** Salieron hojas de verdad,
-con blanco y negro, color, doble faz, copias múltiples y rango de páginas
-verificados uno por uno.
+**Probado el 2026-08-14 con la impresora real.** Salieron hojas de verdad, con
+blanco y negro, color, doble faz, copias múltiples, rango de páginas y ambos
+tamaños verificados uno por uno — incluido A4→A3 y A3→A4, que son los que
+garantizan que lo impreso coincida con lo cobrado.
 
 El entorno de la notebook quedó armado: Python 3.11.9 (la misma que el Mac),
 repo en `C:\PrintNet\printnet`, SumatraPDF en `C:\PrintNet\SumatraPDF.exe`.
@@ -101,11 +102,10 @@ PRINTNET_DISPATCH=sumatra
 PRINTNET_SUMATRA=C:\PrintNet\SumatraPDF.exe
 ```
 
-**Lo único que quedó sin verificar contra el hardware es el tamaño de papel.**
-Costó encontrarlo: SumatraPDF ignora `paper=`, `bin=` y la configuración de la
-cola, y toma el tamaño del **PDF**. La solución fue normalizar el documento
-antes de imprimir (`pdf_normalize.py`), y está cubierta por tests, pero
-**todavía no se imprimió un A3 por esta vía**. Es la próxima prueba.
+El tamaño de papel fue lo que más costó: SumatraPDF ignora `paper=`, `bin=` y
+la configuración de la cola, y toma el tamaño del **PDF**. Se resolvió
+normalizando el documento antes de imprimir (`pdf_normalize.py`) y quedó
+verificado en las dos direcciones contra la impresora.
 
 Herramientas para probar sin levantar el backend:
 
@@ -252,8 +252,10 @@ en el hosting, fuera de la carpeta pública.
 
 ## Próximo paso recomendado
 
-1. Clonar el repo en la notebook y copiarle el `.env` a mano
-2. Probar la impresión real con Python suelto (`PRINTNET_DISPATCH=sumatra`)
-3. Crear el túnel nombrado **+ la seguridad del admin en la misma sesión**
-4. Compilar el `.exe` e instalar como servicio
-5. Activar los pedidos en `config.js`
+1. ~~Clonar el repo en la notebook~~ ✅
+2. ~~Probar la impresión real~~ ✅ (2026-08-14)
+3. Copiarle el `.env` a la notebook (a mano, no va por git)
+4. Probar un pedido completo de punta a punta con el backend levantado
+5. Crear el túnel nombrado **+ la seguridad del admin en la misma sesión**
+6. Compilar el `.exe` e instalar como servicio
+7. Activar los pedidos en `config.js`
