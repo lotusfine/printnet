@@ -282,8 +282,8 @@ Comando que arma `construir_comando()`:
 
 ```
 SumatraPDF.exe -print-to "RICOH IM C4500 PCL 6"
-               -print-settings "3-8,monochrome,duplexlong,2x,paper=A4,fit"
-               -silent -exit-when-done  archivo.pdf
+               -print-settings "3-8,monochrome,duplexlong,2x,fit"
+               -silent -exit-when-done  temporal-ya-normalizado.pdf
 ```
 
 | Nuestra opción | Token de `-print-settings` |
@@ -291,10 +291,33 @@ SumatraPDF.exe -print-to "RICOH IM C4500 PCL 6"
 | `color: byn` / `color` | `monochrome` / `color` |
 | `caras: simple` / `doble` | `simplex` / `duplexlong` |
 | `copias: N` | `Nx` |
-| `tamano: A4` / `A3` | `paper=A4` / `paper=A3` |
 | `rango: {modo: "rango", valor: "3-8"}` | `3-8`, antepuesto |
 | `rango: {modo: "todas"}` | (no se emite token) |
 | — siempre — | `fit` |
+| `tamano: A4` / `A3` | **no se emite** — ver abajo |
+
+### El tamaño de papel NO se pide por línea de comandos
+
+Verificado empíricamente contra la Ricoh IM C4500 (2026-08-14). Se probaron
+cuatro caminos y **los cuatro se ignoran en silencio**:
+
+1. `paper=A3` en `-print-settings` (también en minúscula, `paper=a3`)
+2. `bin=2`, apuntando a la bandeja que tiene el A3 cargado
+3. `Set-PrintConfiguration -PaperSize A3` sobre la cola
+4. Una segunda cola de Windows (`RICOH IM C4500 A3`) con A3 fijado a mano en
+   el driver, tanto en *Preferencias de impresión* como en *Valores
+   predeterminados*
+
+En la misma prueba, el resto de los tokens del bloque **sí** se respetaban
+(rango, color, faz, copias) — no era que SumatraPDF descartara la lista
+entera. Y un PDF cuyas páginas **son** A3 sale en A3 sin pedir nada.
+
+Conclusión: SumatraPDF toma el tamaño del papel del **tamaño de página del
+PDF**. Por eso el tamaño se resuelve en `pdf_normalize.py`, reescribiendo el
+documento antes de imprimir, y `construir_comando()` no emite `paper=`.
+
+(El driver **sí** hace A3 correctamente cuando se elige a mano en su diálogo
+de impresión: el problema es del canal por línea de comandos, no del equipo.)
 
 Las tres opciones de impresión se emiten **siempre explícitas**: el driver de
 la Ricoh tiene dúplex activado en sus preferencias por defecto, así que omitir
@@ -313,8 +336,30 @@ opciones inválidas, timeout de 120 s, código de salida ≠ 0): todos devuelven
 `DispatchResult(ok=False)`. Es deliberado — esto corre dentro del webhook de
 MercadoPago, y una excepción haría que MP reintentara el pago.
 
-Tests: `test_dispatch.py` (24 casos, sin Windows ni impresora — inyecta un
-ejecutor falso y verifica el comando armado).
+Tests: `test_dispatch.py` (sin Windows ni impresora — inyecta un ejecutor
+falso, verifica el comando armado y mide el PDF que recibiría SumatraPDF).
+
+## pdf_normalize
+
+`normalizar_pdf(origen, destino, tamano) → ResultadoNormalizacion(paginas, convertidas)`.
+
+Reescribe el PDF con todas sus páginas en el tamaño pedido, escalando el
+contenido proporcionalmente y centrándolo. Lo llama `SumatraDispatcher` antes
+de cada impresión, sobre un temporal que se borra solo.
+
+**Se normaliza siempre, no solo cuando el pedido es A3.** Si el papel sigue al
+documento, un cliente que sube un PDF A3 y paga precio de A4 imprimiría en A3.
+Normalizar en las dos direcciones es lo que hace que lo impreso coincida con
+lo cobrado.
+
+Detalles: la orientación de cada página se conserva (una A4 apaisada va a A3
+apaisada); un documento con páginas de tamaños mezclados sale entero en el
+tamaño pedido; las páginas que ya están bien se copian sin reescalar; se usa
+`min()` al escalar, así que entra todo y no se recorta nada — un tamaño de
+proporción distinta (carta) queda centrado con margen parejo. Las páginas con
+`/Rotate` se resuelven con `transfer_rotation_to_content()` antes de medir.
+
+Tests: `test_pdf_normalize.py` (16 casos).
 
 ## Variables de entorno de MercadoPago
 

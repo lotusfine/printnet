@@ -71,7 +71,12 @@ def main() -> int:
     print(f"  rango   : {args.rango or 'todas las páginas'}")
     print(f"\nImpresora: {args.impresora}")
     print(f"SumatraPDF: {args.sumatra}")
-    print("\nComando que se ejecuta:")
+    print("\nAntes de imprimir, el PDF se reescribe con todas sus páginas en "
+          f"{args.tamano}:")
+    print("  SumatraPDF ignora el tamaño de papel que se le pide y usa el del")
+    print("  documento, así que el tamaño se resuelve en el PDF, no en el comando.")
+
+    print("\nComando que se ejecuta (sobre el PDF ya normalizado, en un temporal):")
     print("  " + " ".join(f'"{a}"' if " " in a else a for a in cmd))
 
     if args.simular:

@@ -24,8 +24,11 @@ después; está deliberadamente fuera de alcance por ahora.
 import logging
 import os
 import subprocess
+import tempfile
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+
+from pdf_normalize import normalizar_pdf
 
 logger = logging.getLogger("printnet.dispatch")
 
@@ -92,11 +95,14 @@ def construir_comando(exe_path: str, printer_nombre: str, file_path: str,
     partes = []
     if rango.get("modo") == "rango" and rango.get("valor", "").strip():
         partes.append(rango["valor"].strip())
+    # OJO: acá NO va el tamaño de papel. SumatraPDF ignora `paper=` (y `bin=`,
+    # y la configuración de la cola): usa el tamaño de página del PDF. El
+    # tamaño se resuelve normalizando el documento antes de imprimir, en
+    # pdf_normalize.py. Ver SPEC.md.
     partes += [
         _COLOR[op["color"]],
         _CARAS[op["caras"]],
         f"{op['copias']}x",
-        f"paper={op['tamano']}",
         _ESCALADO,
     ]
 
@@ -133,20 +139,38 @@ class SumatraDispatcher(PrintDispatcher):
             return self._error(f"El archivo a imprimir no existe: '{file_path}'")
 
         try:
-            cmd = construir_comando(self.exe_path, printer_nombre, file_path, options)
+            tamano = options["opciones"]["tamano"]
         except (KeyError, TypeError) as e:
             return self._error(f"Opciones de impresión inválidas ({e}) en {options}")
 
-        # Nada acá adentro puede propagar una excepción: esto corre dentro del
-        # webhook de MercadoPago, y si revienta, MP reintenta el pago.
-        try:
-            proc = self._run(
-                cmd, capture_output=True, text=True, timeout=self.TIMEOUT_SEG
-            )
-        except Exception as e:
-            return self._error(
-                f"Falló la ejecución de SumatraPDF ({type(e).__name__}: {e})"
-            )
+        # El tamaño de papel no se puede pedir por línea de comandos: hay que
+        # entregarle a SumatraPDF un PDF que YA esté en el tamaño correcto.
+        # El temporal se borra solo al salir del `with`.
+        with tempfile.TemporaryDirectory(prefix="printnet-") as carpeta:
+            listo = os.path.join(carpeta, "imprimir.pdf")
+            try:
+                normalizar_pdf(file_path, listo, tamano)
+            except Exception as e:
+                return self._error(
+                    f"No se pudo preparar '{file_path}' para imprimir en {tamano} "
+                    f"({type(e).__name__}: {e})"
+                )
+
+            try:
+                cmd = construir_comando(self.exe_path, printer_nombre, listo, options)
+            except (KeyError, TypeError) as e:
+                return self._error(f"Opciones de impresión inválidas ({e}) en {options}")
+
+            # Nada acá adentro puede propagar una excepción: esto corre dentro
+            # del webhook de MercadoPago, y si revienta, MP reintenta el pago.
+            try:
+                proc = self._run(
+                    cmd, capture_output=True, text=True, timeout=self.TIMEOUT_SEG
+                )
+            except Exception as e:
+                return self._error(
+                    f"Falló la ejecución de SumatraPDF ({type(e).__name__}: {e})"
+                )
 
         if proc.returncode != 0:
             return self._error(
@@ -156,7 +180,7 @@ class SumatraDispatcher(PrintDispatcher):
 
         detalle = (
             f"Encolado '{file_path}' en '{printer_nombre}' "
-            f"con settings {cmd[cmd.index('-print-settings') + 1]}"
+            f"({tamano}, settings {cmd[cmd.index('-print-settings') + 1]})"
         )
         logger.info(detalle)
         return DispatchResult(ok=True, detalle=detalle)

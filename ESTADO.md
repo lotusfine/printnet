@@ -84,31 +84,39 @@ Hasta ahora se venían usando **túneles rápidos** (`trycloudflare.com`), cuya
 URL **cambia en cada arranque** — eso obligaba a reconfigurar tres lugares cada
 vez. Con el túnel nombrado la dirección queda fija para siempre.
 
-### 2. La impresión: escrita, falta probarla contra la Ricoh ⚠️
+### 2. La impresión: anda, falta probar el tamaño de papel
 
-`SumatraDispatcher` ya está escrito en `print_dispatch.py`, con 24 tests en
-`test_dispatch.py` que verifican el comando que se le arma a SumatraPDF sin
-necesidad de Windows. El mapeo completo está en `SPEC.md`.
+**Probado contra la Ricoh el 2026-08-14 y funciona.** Salieron hojas de verdad,
+con blanco y negro, color, doble faz, copias múltiples y rango de páginas
+verificados uno por uno.
 
-**Lo que falta es la prueba contra el hardware**, que solo se puede hacer en la
-notebook. Para activarlo ahí:
+El entorno de la notebook quedó armado: Python 3.11.9 (la misma que el Mac),
+repo en `C:\PrintNet\printnet`, SumatraPDF en `C:\PrintNet\SumatraPDF.exe`.
+La impresora se llama exactamente `RICOH IM C4500 PCL 6` y está en la red.
+
+Para imprimir de verdad hay que poner en el `.env`:
 
 ```
 PRINTNET_DISPATCH=sumatra
 PRINTNET_SUMATRA=C:\PrintNet\SumatraPDF.exe
 ```
 
-Datos de la impresora ya confirmados en la notebook: se llama exactamente
-`RICOH IM C4500 PCL 6` (ese string va literal), el driver expone dúplex, color
-y A3, y admite hasta 999 copias.
+**Lo único que quedó sin verificar contra el hardware es el tamaño de papel.**
+Costó encontrarlo: SumatraPDF ignora `paper=`, `bin=` y la configuración de la
+cola, y toma el tamaño del **PDF**. La solución fue normalizar el documento
+antes de imprimir (`pdf_normalize.py`), y está cubierta por tests, pero
+**todavía no se imprimió un A3 por esta vía**. Es la próxima prueba.
 
-**Ojo con dos cosas al probar:**
+Herramientas para probar sin levantar el backend:
 
-- `ok=True` significa *"se encoló"*, no *"salió el papel"*. Si la impresora se
-  traba, el pedido igual figura despachado. Verificar la cola de Windows quedó
-  fuera de alcance a propósito.
-- SumatraPDF está en el escritorio de la notebook y todavía **no se abrió
-  nunca**. Conviene abrirlo una vez a mano antes de la primera prueba.
+```
+python generar_pdf_prueba.py --paginas 4 --tamano A3 --salida C:\PrintNet\p.pdf
+python prueba_impresion.py C:\PrintNet\p.pdf --tamano A3 --simular
+```
+
+**Ojo:** `ok=True` significa *"se encoló"*, no *"salió el papel"*. Si la
+impresora se traba, el pedido igual figura despachado. Verificar la cola de
+Windows quedó fuera de alcance a propósito.
 
 ### 3. El panel de admin no tiene seguridad ⚠️
 
@@ -197,6 +205,18 @@ a `libreriaglaxara.com.ar`, que apunta a `167.250.5.3`. Si algún día se mueve
 la raíz a otro servidor, **el correo se rompe sin avisar**. La solución sería
 crear un registro `mx.libreriaglaxara.com.ar` y apuntar el MX ahí. No es
 urgente mientras la web siga en cPanel.
+
+**El tamaño de papel no se puede pedir por línea de comandos.** SumatraPDF
+ignora `paper=`, `bin=` y la configuración de la cola de Windows — las tres en
+silencio, sin error. Usa el tamaño de página del PDF. Por eso existe
+`pdf_normalize.py`: el documento se reescribe al tamaño pedido antes de
+imprimir. **Consecuencia de plata:** hay que normalizar SIEMPRE, no solo los
+pedidos A3, porque un cliente que sube un PDF A3 y paga A4 imprimiría en A3.
+
+**Hay dos colas de la Ricoh instaladas en Windows** (`RICOH IM C4500 PCL 6` y
+`RICOH IM C4500 A3`). La segunda se creó intentando resolver lo anterior y
+**no sirvió**. Es inofensiva, pero se puede borrar: el código usa solo la
+primera.
 
 **La impresora está en la red, no en el USB.** El puerto es
 `IP_192.168.10.128`. Bueno: no depende de que esté enchufada a esa notebook en
