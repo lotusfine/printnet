@@ -18,14 +18,22 @@ import argparse
 ANCHO, ALTO = 595, 842
 
 
+# El número va en color a propósito: si se imprime en modo "byn" tiene que
+# salir gris, y si se imprime en "color" tiene que salir rojo. Con un PDF todo
+# negro las dos opciones dan el mismo resultado y no se puede verificar nada.
+ROJO = "0.85 0.10 0.10"
+
+
 def _contenido(numero: int, total: int) -> bytes:
     """Stream de dibujo de una página: el número grande y un pie de página."""
     return (
+        f"{ROJO} rg\n"
         f"BT /F1 300 Tf 1 0 0 1 {ANCHO / 2 - 90:.0f} {ALTO / 2 - 100:.0f} Tm "
         f"({numero}) Tj ET\n"
+        f"0 0 0 rg\n"
         f"BT /F1 24 Tf 1 0 0 1 60 80 Tm (pagina {numero} de {total}) Tj ET\n"
         f"BT /F1 14 Tf 1 0 0 1 60 {ALTO - 60:.0f} Tm "
-        f"(PrintNet - PDF de prueba) Tj ET\n"
+        f"(PrintNet - PDF de prueba - el numero va en ROJO) Tj ET\n"
     ).encode("latin-1")
 
 
