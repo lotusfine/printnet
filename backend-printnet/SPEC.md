@@ -1,7 +1,10 @@
 # PrintNet Backend — SPEC (contrato vivo)
 
-> Este archivo es el contrato que se lee y actualiza en cada sesión de trabajo.
-> Última actualización: 2026-07-13 · **Pago real con MercadoPago Checkout Pro integrado y verificado (con MP mockeado).**
+> Este archivo es el contrato técnico del backend. Para el estado general del
+> proyecto y qué falta hacer, ver **`ESTADO.md`** en la raíz del repositorio.
+> Última actualización: 2026-08-19 · **MercadoPago en producción verificado con
+> dinero real. Dominio migrado a Cloudflare. Falta el túnel nombrado, el
+> despachador de impresión real y la autenticación del admin.**
 
 ## Fase actual: pagos reales (Checkout Pro)
 
@@ -13,8 +16,9 @@
     local sin credenciales.
   - **Pedidos de /fotos**: NO pasan por MercadoPago (no tienen precio online;
     se cotizan y cobran en el local). Siguen el flujo de Fase 1.
-- **Impresión**: sigue simulada. `SimulatedDispatcher` registra en `dispatch_log`
-  la intención sin tocar hardware.
+- **Impresión**: ⚠️ **SIGUE SIMULADA**. `SimulatedDispatcher` registra en
+  `dispatch_log` la intención sin tocar hardware. El despachador real para la
+  Ricoh IM C4500 (vía SumatraPDF en Windows) **está pendiente de escribir**.
 - **Fuera de alcance**: reembolsos/cancelaciones/contracargos de MP, impresora
   física, WhatsApp.
 

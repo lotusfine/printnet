@@ -17,6 +17,10 @@ Cloudflare  ──túnel 'printnet'──►  notebook
 
 ## Parte 0 — Crear el túnel nombrado `printnet` (PREREQUISITO)
 
+> **Estado al 2026-08-19:** el dominio `libreriaglaxara.com.ar` YA está migrado
+> a Cloudflare, así que el punto 0.1 (dominio) está cumplido. Falta ejecutar
+> 0.2 en adelante.
+>
 > Salteá esta parte solo si `cloudflared tunnel list` ya muestra un túnel
 > llamado `printnet`.
 
