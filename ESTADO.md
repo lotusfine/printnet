@@ -84,24 +84,31 @@ Hasta ahora se venían usando **túneles rápidos** (`trycloudflare.com`), cuya
 URL **cambia en cada arranque** — eso obligaba a reconfigurar tres lugares cada
 vez. Con el túnel nombrado la dirección queda fija para siempre.
 
-### 2. La impresión no está programada ⚠️
+### 2. La impresión: escrita, falta probarla contra la Ricoh ⚠️
 
-**Esto es lo que más se subestima.** Hoy el sistema escribe en un registro
-*"se despacharía este archivo"* y no manda nada a ninguna impresora.
-`print_dispatch.py` solo tiene `SimulatedDispatcher`.
+`SumatraDispatcher` ya está escrito en `print_dispatch.py`, con 24 tests en
+`test_dispatch.py` que verifican el comando que se le arma a SumatraPDF sin
+necesidad de Windows. El mapeo completo está en `SPEC.md`.
 
-Falta escribir el despachador real que le habla a SumatraPDF. El mapeo de
-nuestras opciones a sus parámetros es directo:
+**Lo que falta es la prueba contra el hardware**, que solo se puede hacer en la
+notebook. Para activarlo ahí:
 
-| Nuestra opción | SumatraPDF |
-|---|---|
-| `color: byn` / `color` | `monochrome` / `color` |
-| `caras: simple` / `doble` | `simplex` / `duplexlong` |
-| `copias: N` | `Nx` |
-| `tamano: A4` / `A3` | `paper=A4` / `paper=A3` |
-| `rango: "3-8"` | `3-8` |
+```
+PRINTNET_DISPATCH=sumatra
+PRINTNET_SUMATRA=C:\PrintNet\SumatraPDF.exe
+```
 
-Solo se puede probar en Windows con la impresora conectada.
+Datos de la impresora ya confirmados en la notebook: se llama exactamente
+`RICOH IM C4500 PCL 6` (ese string va literal), el driver expone dúplex, color
+y A3, y admite hasta 999 copias.
+
+**Ojo con dos cosas al probar:**
+
+- `ok=True` significa *"se encoló"*, no *"salió el papel"*. Si la impresora se
+  traba, el pedido igual figura despachado. Verificar la cola de Windows quedó
+  fuera de alcance a propósito.
+- SumatraPDF está en el escritorio de la notebook y todavía **no se abrió
+  nunca**. Conviene abrirlo una vez a mano antes de la primera prueba.
 
 ### 3. El panel de admin no tiene seguridad ⚠️
 
@@ -113,7 +120,17 @@ Hoy está protegido por accidente (la URL del túnel es aleatoria), pero **con
 `api.libreriaglaxara.com.ar` fija y pública deja de estarlo**. Hay datos reales
 de clientes en la base.
 
-**Resolver antes de abrir al público.**
+**Decidido (2026-08-14): se resuelve en la misma sesión en que se cree el
+túnel**, no antes ni después. Mientras el backend viva detrás de un túnel
+rápido de URL rotativa no hay exposición real; el riesgo empieza exactamente
+cuando la dirección queda fija.
+
+El arreglo es chico: `routers/admin.py` son 185 líneas con **3 endpoints**
+colgando de un único `APIRouter(prefix="/admin")`, así que un token en `.env`
+más un `dependencies=[Depends(...)]` en ese router los cubre a los tres.
+El `admin123` de `Admin.jsx:94` no hay que tocarlo todavía: **ese panel sigue
+usando datos mock y no llama al backend** — cuando se conecte, el header de
+auth entra como parte de ese trabajo.
 
 ### 4. Compilar el `.exe` e instalarlo como servicio
 
@@ -181,6 +198,13 @@ la raíz a otro servidor, **el correo se rompe sin avisar**. La solución sería
 crear un registro `mx.libreriaglaxara.com.ar` y apuntar el MX ahí. No es
 urgente mientras la web siga en cPanel.
 
+**La impresora está en la red, no en el USB.** El puerto es
+`IP_192.168.10.128`. Bueno: no depende de que esté enchufada a esa notebook en
+particular. Malo: **si el router le cambia la IP por DHCP, la impresión se
+corta sin avisar** y el pedido va a fallar con un error de SumatraPDF que no
+dice eso. Hay que reservarle la IP en el router. Pendiente de verificar con
+quien administre la red del local.
+
 **En Cloudflare, todo en "DNS only" (nube gris).** El correo no funciona a
 través del proxy de Cloudflare. Si alguien pone la raíz o `mail` en naranja,
 se rompe el correo.
@@ -208,9 +232,8 @@ en el hosting, fuera de la carpeta pública.
 
 ## Próximo paso recomendado
 
-1. Crear el túnel nombrado (el dominio ya está listo)
-2. Escribir el despachador de impresión
-3. Resolver la seguridad del admin
-4. Llevar todo a la notebook, probar con Python suelto
-5. Compilar el `.exe` e instalar como servicio
-6. Activar los pedidos en `config.js`
+1. Clonar el repo en la notebook y copiarle el `.env` a mano
+2. Probar la impresión real con Python suelto (`PRINTNET_DISPATCH=sumatra`)
+3. Crear el túnel nombrado **+ la seguridad del admin en la misma sesión**
+4. Compilar el `.exe` e instalar como servicio
+5. Activar los pedidos en `config.js`

@@ -16,9 +16,11 @@
     local sin credenciales.
   - **Pedidos de /fotos**: NO pasan por MercadoPago (no tienen precio online;
     se cotizan y cobran en el local). Siguen el flujo de Fase 1.
-- **Impresión**: ⚠️ **SIGUE SIMULADA**. `SimulatedDispatcher` registra en
-  `dispatch_log` la intención sin tocar hardware. El despachador real para la
-  Ricoh IM C4500 (vía SumatraPDF en Windows) **está pendiente de escribir**.
+- **Impresión**: `SumatraDispatcher` (Windows) ya está escrito y cubierto por
+  `test_dispatch.py`, pero **todavía no se probó contra la Ricoh IM C4500**.
+  El default sigue siendo `SimulatedDispatcher`, que registra en `dispatch_log`
+  la intención sin tocar hardware; para imprimir de verdad hay que poner
+  `PRINTNET_DISPATCH=sumatra` en la notebook.
 - **Fuera de alcance**: reembolsos/cancelaciones/contracargos de MP, impresora
   física, WhatsApp.
 
@@ -264,9 +266,55 @@ Config por env (ver `.env.example`): `PRINTNET_SMTP_HOST/PORT/USER/PASSWORD/FROM
 - "recibido": al crear el pedido (background, no bloquea la respuesta).
 - "listo": hook implementado, se dispara en `PATCH → listo`.
 
-## print_dispatch (interfaz abstracta)
+## print_dispatch
 
-`PrintDispatcher.dispatch(printer_nombre, file_path, options) → DispatchResult(ok, detalle)`. Fase 1: `SimulatedDispatcher`. Futuras (sin tocar el resto del sistema): `SumatraDispatcher` (Windows, SumatraPDF CLI) y `CupsDispatcher` (Linux/Pi, `lp`). Selección por env `PRINTNET_DISPATCH` (default `simulated`). Atajo funcional: `dispatch_print(...)`.
+`PrintDispatcher.dispatch(printer_nombre, file_path, options) → DispatchResult(ok, detalle)`.
+Implementados: `SimulatedDispatcher` (default) y `SumatraDispatcher` (Windows).
+Pendiente, si el backend se muda a una Pi: `CupsDispatcher` (Linux, `lp`).
+Selección por env `PRINTNET_DISPATCH` (default `simulated`). Atajo funcional: `dispatch_print(...)`.
+
+### SumatraDispatcher (Windows)
+
+Env: `PRINTNET_DISPATCH=sumatra` y `PRINTNET_SUMATRA` = ruta al `SumatraPDF.exe`
+(default `C:\PrintNet\SumatraPDF.exe`).
+
+Comando que arma `construir_comando()`:
+
+```
+SumatraPDF.exe -print-to "RICOH IM C4500 PCL 6"
+               -print-settings "3-8,monochrome,duplexlong,2x,paper=A4,fit"
+               -silent -exit-when-done  archivo.pdf
+```
+
+| Nuestra opción | Token de `-print-settings` |
+|---|---|
+| `color: byn` / `color` | `monochrome` / `color` |
+| `caras: simple` / `doble` | `simplex` / `duplexlong` |
+| `copias: N` | `Nx` |
+| `tamano: A4` / `A3` | `paper=A4` / `paper=A3` |
+| `rango: {modo: "rango", valor: "3-8"}` | `3-8`, antepuesto |
+| `rango: {modo: "todas"}` | (no se emite token) |
+| — siempre — | `fit` |
+
+Las tres opciones de impresión se emiten **siempre explícitas**: el driver de
+la Ricoh tiene dúplex activado en sus preferencias por defecto, así que omitir
+un token no significa "como venga" sino "como esté ese diálogo".
+
+`fit` escala al tamaño de hoja elegido por el cliente (decisión tomada: un A4
+pedido en A3 debe llenar la hoja A3, no salir chico y centrado).
+
+**`ok=True` significa "se encoló", no "salió el papel".** SumatraPDF entrega
+el trabajo al spooler de Windows y vuelve enseguida; si la impresora se traba
+o se queda sin toner, el pedido igual figura despachado. Verificar la cola de
+Windows está fuera de alcance por ahora.
+
+Ningún camino de error propaga excepciones (ejecutable ausente, PDF ausente,
+opciones inválidas, timeout de 120 s, código de salida ≠ 0): todos devuelven
+`DispatchResult(ok=False)`. Es deliberado — esto corre dentro del webhook de
+MercadoPago, y una excepción haría que MP reintentara el pago.
+
+Tests: `test_dispatch.py` (24 casos, sin Windows ni impresora — inyecta un
+ejecutor falso y verifica el comando armado).
 
 ## Variables de entorno de MercadoPago
 
