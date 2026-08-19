@@ -1,7 +1,8 @@
 """Endpoints del panel de administración.
 
-Fase 1: SIN autenticación (el login de /admin es solo client-side).
-Agregar auth real es tarea de una fase futura — ver SPEC.md.
+Protegidos por token: la dependencia va en el router, no endpoint por
+endpoint, así cubre también los que se agreguen más adelante. Ver `auth.py`
+para el porqué y para qué pasa si el token no está configurado.
 
 El shape de respuesta de GET /admin/orders replica lo que la UI de /admin
 ya espera para pintar sus OrderCards: cliente, archivo, paginas, copias,
@@ -17,10 +18,11 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 import notifications
+from auth import verificar_admin
 from database import get_db
 from models import ESTADOS, CambioEstado
 
-router = APIRouter(prefix="/admin")
+router = APIRouter(prefix="/admin", dependencies=[Depends(verificar_admin)])
 
 # Transiciones de estado permitidas. Las transiciones DE pago (pendiente_pago
 # → pagado/pago_rechazado) las maneja exclusivamente el webhook de MercadoPago;

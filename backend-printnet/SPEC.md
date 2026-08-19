@@ -361,6 +361,35 @@ proporción distinta (carta) queda centrado con margen parejo. Las páginas con
 
 Tests: `test_pdf_normalize.py` (16 casos).
 
+## auth (panel de administración)
+
+`/admin/*` exige el header **`X-Admin-Token`**, comparado contra
+`PRINTNET_ADMIN_TOKEN` del `.env`. La dependencia se engancha **en el router**
+(`APIRouter(prefix="/admin", dependencies=[Depends(verificar_admin)])`), no
+endpoint por endpoint, así cubre también los que se agreguen después.
+
+**Se falla cerrado.** Sin `PRINTNET_ADMIN_TOKEN`, o con menos de 16
+caracteres, `/admin/*` responde **503** — ni siquiera con un header correcto.
+Un panel que no anda se nota en el momento; uno que quedó abierto no se nota
+nunca. El mínimo de largo existe para que nadie vuelva a poner `admin123`.
+
+| Situación | Respuesta |
+|---|---|
+| `PRINTNET_ADMIN_TOKEN` sin configurar o < 16 caracteres | 503 |
+| Header ausente o incorrecto | 401 |
+| Header correcto | pasa |
+
+La comparación usa `secrets.compare_digest` (tiempo constante) y tolera
+espacios alrededor del valor recibido, que aparecen al copiar y pegar.
+
+Generar un token: `python -c "import secrets; print(secrets.token_urlsafe(32))"`
+
+`/orders/*` y `/webhooks/*` siguen **públicos**: son los que usan el cliente y
+MercadoPago. El webhook se valida por firma, aparte.
+
+Tests: `test_auth.py` (21 casos, sin TestClient — `httpx` no está en
+`requirements.txt` y no queremos dependencias de desarrollo en la notebook).
+
 ## Variables de entorno de MercadoPago
 
 Ver `.env.example`. **Nunca commitear ni loggear los valores reales.**

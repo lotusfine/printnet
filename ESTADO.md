@@ -143,27 +143,25 @@ verificado en las dos direcciones contra la impresora.
 impresora se traba, el pedido igual figura despachado. Verificar la cola de
 Windows quedó fuera de alcance a propósito.
 
-### 3. El panel de admin no tiene seguridad ⚠️
+### 3. Seguridad del panel de admin — ✅ hecha (2026-08-19)
 
-La contraseña `admin123` **se valida en el navegador, no en el servidor**. Los
-endpoints `/admin/*` responden a cualquiera que sepa la URL: se pueden leer
-nombres, teléfonos y emails de clientes, y modificar pedidos.
+`/admin/*` exige el header `X-Admin-Token` contra `PRINTNET_ADMIN_TOKEN` del
+`.env`. Antes, la única "contraseña" era `admin123` comparada en el navegador:
+los endpoints respondían a cualquiera que supiera la URL, con nombres,
+teléfonos y emails de clientes reales adentro.
 
-Hoy está protegido por accidente (la URL del túnel es aleatoria), pero **con
-`api.libreriaglaxara.com.ar` fija y pública deja de estarlo**. Hay datos reales
-de clientes en la base.
+**Falta un paso tuyo antes de abrir el túnel:** generar el token y ponerlo en
+el `.env` de la notebook. Si no está, `/admin/*` responde 503 — se falla
+cerrado a propósito, así que el olvido se nota en el acto en vez de quedar
+abierto en silencio.
 
-**Decidido (2026-08-14): se resuelve en la misma sesión en que se cree el
-túnel**, no antes ni después. Mientras el backend viva detrás de un túnel
-rápido de URL rotativa no hay exposición real; el riesgo empieza exactamente
-cuando la dirección queda fija.
+```
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
 
-El arreglo es chico: `routers/admin.py` son 185 líneas con **3 endpoints**
-colgando de un único `APIRouter(prefix="/admin")`, así que un token en `.env`
-más un `dependencies=[Depends(...)]` en ese router los cubre a los tres.
-El `admin123` de `Admin.jsx:94` no hay que tocarlo todavía: **ese panel sigue
-usando datos mock y no llama al backend** — cuando se conecte, el header de
-auth entra como parte de ese trabajo.
+El `admin123` de `Admin.jsx:94` sigue ahí y **no hay que tocarlo todavía**: ese
+panel usa datos mock y no llama al backend. Cuando se conecte, el header entra
+como parte de ese trabajo.
 
 ### 4. Compilar el `.exe` e instalarlo como servicio
 
