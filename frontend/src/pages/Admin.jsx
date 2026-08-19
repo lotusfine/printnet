@@ -1,11 +1,14 @@
 import { useState, useRef, useEffect } from 'react';
+import { borrarToken, guardarToken, leerToken } from '../adminAuth';
 import { listarPedidosAdmin, cambiarEstadoPedido, listarImpresoras } from '../api';
 
 // ─────────────────────────────────────────────
-// DATOS MOCK
+// DATOS DE RELLENO (solo impresoras)
 // ─────────────────────────────────────────────
-// Los pedidos ahora vienen del backend (GET /admin/orders).
-// Las impresoras se cargan del backend, con este fallback si no responde:
+// OJO: los pedidos NO son mock — vienen del backend (GET /admin/orders), se
+// refrescan cada 15 s y los botones de estado llaman a PATCH /admin/orders/{id}.
+// Lo único de mentira acá es esta lista, que se muestra si /admin/printers no
+// responde. Si ves "HP LaserJet 1" en el panel, es que el backend no contestó.
 const INIT_PRINTERS = [
   {
     id: 1, nombre: 'HP LaserJet 1', tipo: 'laser', estado: 'error',
@@ -87,15 +90,34 @@ const Modal = ({ onClose, children }) => (
 // ─────────────────────────────────────────────
 const LoginScreen = ({ onLogin }) => {
   const [pass, setPass] = useState('');
-  const [error, setError] = useState(false);
+  const [error, setError] = useState('');
+  const [verificando, setVerificando] = useState(false);
 
-  const handleSubmit = (e) => {
+  // El token no se valida acá: se guarda y se prueba contra el backend. Así
+  // el operador se entera en el momento si está mal, en vez de entrar a un
+  // panel vacío que no sabe explicar por qué no trae nada.
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (pass === 'admin123') {
+    if (!pass.trim() || verificando) return;
+
+    setVerificando(true);
+    setError('');
+    guardarToken(pass);
+    try {
+      await listarPedidosAdmin();
       onLogin();
-    } else {
-      setError(true);
+    } catch (err) {
+      borrarToken();
       setPass('');
+      if (err.status === 401) {
+        setError('Token incorrecto');
+      } else if (err.status === 503) {
+        setError('El servidor no tiene configurado el token de admin');
+      } else {
+        setError('No se pudo conectar con el servidor');
+      }
+    } finally {
+      setVerificando(false);
     }
   };
 
@@ -114,14 +136,14 @@ const LoginScreen = ({ onLogin }) => {
         <form onSubmit={handleSubmit} className="bg-stone-800 border border-stone-700 rounded-2xl p-6 shadow-xl space-y-4">
           <div>
             <label className="block text-[10px] font-black uppercase tracking-[0.25em] text-stone-400 mb-2">
-              Contraseña
+              Token de acceso
             </label>
             <input
               type="password"
               value={pass}
-              onChange={(e) => { setPass(e.target.value); setError(false); }}
+              onChange={(e) => { setPass(e.target.value); setError(''); }}
               autoFocus
-              placeholder="••••••••"
+              placeholder="••••••••••••••••"
               className={`w-full px-4 py-3 rounded-xl bg-stone-900 border text-sm text-white placeholder-stone-600 focus:outline-none transition-colors ${
                 error ? 'border-red-500 focus:border-red-400' : 'border-stone-600 focus:border-amber-500'
               }`}
@@ -131,15 +153,21 @@ const LoginScreen = ({ onLogin }) => {
                 <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
                   <path fillRule="evenodd" d="M9.401 3.003c1.155-2 4.043-2 5.197 0l7.355 12.748c1.154 2-.29 4.5-2.599 4.5H4.645c-2.309 0-3.752-2.5-2.598-4.5L9.4 3.003zM12 8.25a.75.75 0 01.75.75v3.75a.75.75 0 01-1.5 0V9a.75.75 0 01.75-.75zm0 8.25a.75.75 0 100-1.5.75.75 0 000 1.5z" clipRule="evenodd"/>
                 </svg>
-                Contraseña incorrecta
+                {error}
               </p>
             )}
+            <p className="mt-3 text-[11px] leading-relaxed text-stone-500">
+              Es el valor de <span className="font-mono text-stone-400">PRINTNET_ADMIN_TOKEN</span>,
+              del archivo <span className="font-mono text-stone-400">.env</span> del servidor.
+              Queda guardado en este navegador.
+            </p>
           </div>
           <button
             type="submit"
-            className="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-95 text-white font-black text-sm uppercase tracking-widest transition-all shadow-md shadow-amber-500/20"
+            disabled={verificando || !pass.trim()}
+            className="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100 text-white font-black text-sm uppercase tracking-widest transition-all shadow-md shadow-amber-500/20"
           >
-            Ingresar
+            {verificando ? 'Verificando…' : 'Ingresar'}
           </button>
         </form>
       </div>
@@ -627,15 +655,23 @@ const AdminPanel = ({ onLogout }) => {
   const [orders, setOrders] = useState([]);
   const [printers, setPrinters] = useState(INIT_PRINTERS);
   const [cancelTarget, setCancelTarget] = useState(null);
-  // 'cargando' | 'ok' | 'error'
+  // 'cargando' | 'ok' | 'noauth' | 'error'
   const [conexion, setConexion] = useState('cargando');
+  const [detalleError, setDetalleError] = useState('');
 
   const cargarPedidos = async () => {
     try {
       setOrders(await listarPedidosAdmin());
       setConexion('ok');
-    } catch {
-      setConexion('error');
+    } catch (e) {
+      // "No autorizado" y "el servidor no responde" se arreglan distinto:
+      // uno lo resuelve el operador acá, el otro es un problema del local.
+      if (e.status === 401) {
+        setConexion('noauth');
+      } else {
+        setConexion('error');
+        setDetalleError(e.message);
+      }
     }
   };
 
@@ -745,10 +781,23 @@ const AdminPanel = ({ onLogout }) => {
           />
         </aside>
         <div className="order-1 md:order-2 flex-1 min-w-0 space-y-8">
+          {conexion === 'noauth' && (
+            <div className="flex items-center justify-between gap-3 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3">
+              <p className="text-xs font-bold text-amber-300">
+                El token de acceso ya no es válido. Volvé a ingresarlo.
+              </p>
+              <button
+                onClick={onLogout}
+                className="shrink-0 px-3 py-1.5 rounded-lg bg-stone-700/60 hover:bg-stone-700 text-stone-300 text-xs font-bold uppercase tracking-wide transition-all"
+              >
+                Ingresar de nuevo
+              </button>
+            </div>
+          )}
           {conexion === 'error' && (
             <div className="flex items-center justify-between gap-3 bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3">
               <p className="text-xs font-bold text-red-400">
-                No se pudo conectar con el backend (¿está corriendo en el puerto 8000?)
+                No se pudo conectar con el servidor{detalleError ? `: ${detalleError}` : '.'}
               </p>
               <button
                 onClick={cargarPedidos}
@@ -802,9 +851,17 @@ const AdminPanel = ({ onLogout }) => {
 // PÁGINA PRINCIPAL
 // ─────────────────────────────────────────────
 const Admin = () => {
-  const [authed, setAuthed] = useState(false);
+  // Si el navegador ya tiene el token, se entra directo: el operador del local
+  // no debería tener que pegarlo cada vez que abre el panel.
+  const [authed, setAuthed] = useState(() => Boolean(leerToken()));
+
+  const salir = () => {
+    borrarToken();
+    setAuthed(false);
+  };
+
   return authed
-    ? <AdminPanel onLogout={() => setAuthed(false)} />
+    ? <AdminPanel onLogout={salir} />
     : <LoginScreen onLogin={() => setAuthed(true)} />;
 };
 

@@ -1,7 +1,14 @@
 // Cliente del backend PrintNet (backend-printnet, FastAPI).
 // La URL se resuelve en config.js: editable en el servidor sin recompilar.
 export { PRINTNET_API } from './config';
+import { leerToken } from './adminAuth';
 import { PRINTNET_API } from './config';
+
+// Los endpoints /admin/* exigen este header. Sin él, el backend devuelve 401.
+const cabecerasAdmin = () => {
+  const token = leerToken();
+  return token ? { 'X-Admin-Token': token } : {};
+};
 
 const formatearError = (body) => {
   const d = body?.detail;
@@ -13,7 +20,14 @@ const formatearError = (body) => {
 
 const parse = async (res) => {
   const body = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(formatearError(body));
+  if (!res.ok) {
+    // El código va en el error para que la UI distinga "no autorizado" de
+    // "el servidor no responde": son problemas distintos y se arreglan
+    // distinto, y confundirlos ya nos costó un rato de diagnóstico.
+    const error = new Error(formatearError(body));
+    error.status = res.status;
+    throw error;
+  }
   return body;
 };
 
@@ -40,7 +54,9 @@ export async function consultarEstado(token) {
 /** Listado de pedidos para el admin. */
 export async function listarPedidosAdmin(estado) {
   const qs = estado ? `?estado=${estado}` : '';
-  return parse(await fetch(`${PRINTNET_API}/admin/orders${qs}`));
+  return parse(
+    await fetch(`${PRINTNET_API}/admin/orders${qs}`, { headers: cabecerasAdmin() })
+  );
 }
 
 /** Cambia el estado de un pedido (transiciones validadas por el backend). */
@@ -48,7 +64,7 @@ export async function cambiarEstadoPedido(id, estado) {
   return parse(
     await fetch(`${PRINTNET_API}/admin/orders/${id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...cabecerasAdmin() },
       body: JSON.stringify({ estado }),
     })
   );
@@ -56,5 +72,7 @@ export async function cambiarEstadoPedido(id, estado) {
 
 /** Impresoras registradas en el backend. */
 export async function listarImpresoras() {
-  return parse(await fetch(`${PRINTNET_API}/admin/printers`));
+  return parse(
+    await fetch(`${PRINTNET_API}/admin/printers`, { headers: cabecerasAdmin() })
+  );
 }
