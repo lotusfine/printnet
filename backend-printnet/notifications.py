@@ -60,8 +60,43 @@ def send_email(destinatario: str, asunto: str, cuerpo: str) -> tuple[str, str]:
 
 
 def _url_seguimiento(token: str) -> str:
-    base = os.environ.get("PRINTNET_PUBLIC_URL", "").rstrip("/")
-    return f"{base}/orders/status/{token}" if base else f"(token de seguimiento: {token})"
+    """Link a la página de seguimiento — la que ve el cliente.
+
+    Va a `/estado/{token}` del SITIO, no a `/orders/status/{token}` del backend:
+    ese segundo es la API y devuelve datos crudos, ilegibles para una persona.
+
+    Este link es la única forma que tiene el cliente de volver a su pedido
+    después de cerrar la pestaña.
+    """
+    base = os.environ.get("PRINTNET_FRONTEND_URL", "").rstrip("/")
+    return f"{base}/estado/{token}" if base else f"(token de seguimiento: {token})"
+
+
+def _cuerpo_recibido(pedido: dict) -> str:
+    precio = (
+        f"${pedido['precio_total']:,}".replace(",", ".")
+        if pedido["precio_total"] else "a cotizar"
+    )
+    return (
+        f"Hola {pedido['nombre']},\n\n"
+        f"Recibimos tu pedido #{pedido['id']} ({pedido['tipo']}).\n"
+        f"Total: {precio}\n\n"
+        f"Podés seguir el estado de tu pedido en cualquier momento acá:\n"
+        f"{_url_seguimiento(pedido['token'])}\n\n"
+        f"Guardá este mail: es la forma de volver a encontrar tu pedido.\n\n"
+        f"Librería Glaxara · PrintNet"
+    )
+
+
+def _cuerpo_listo(pedido: dict) -> str:
+    return (
+        f"Hola {pedido['nombre']},\n\n"
+        f"¡Tu pedido #{pedido['id']} está listo para retirar!\n\n"
+        f"Te esperamos en Librería Glaxara.\n\n"
+        f"Detalle de tu pedido:\n"
+        f"{_url_seguimiento(pedido['token'])}\n\n"
+        f"Librería Glaxara · PrintNet"
+    )
 
 
 def _datos_pedido(order_id: int) -> dict | None:
@@ -97,16 +132,9 @@ def notificar_pedido_recibido(order_id: int) -> None:
     pedido = _datos_pedido(order_id)
     if not pedido:
         return
-    precio = f"${pedido['precio_total']:,}".replace(",", ".") if pedido["precio_total"] else "a cotizar"
-    cuerpo = (
-        f"Hola {pedido['nombre']},\n\n"
-        f"Recibimos tu pedido #{pedido['id']} ({pedido['tipo']}).\n"
-        f"Total: {precio}\n\n"
-        f"Podés consultar el estado en cualquier momento acá:\n"
-        f"{_url_seguimiento(pedido['token'])}\n\n"
-        f"Librería Glaxara · PrintNet"
+    estado, detalle = send_email(
+        pedido["email"], f"Pedido #{pedido['id']} recibido", _cuerpo_recibido(pedido)
     )
-    estado, detalle = send_email(pedido["email"], f"Pedido #{pedido['id']} recibido", cuerpo)
     _registrar(order_id, "recibido", pedido["email"], estado, detalle)
 
 
@@ -115,10 +143,9 @@ def notificar_pedido_listo(order_id: int) -> None:
     pedido = _datos_pedido(order_id)
     if not pedido:
         return
-    cuerpo = (
-        f"Hola {pedido['nombre']},\n\n"
-        f"¡Tu pedido #{pedido['id']} está listo para retirar!\n\n"
-        f"Te esperamos en Librería Glaxara.\n"
+    estado, detalle = send_email(
+        pedido["email"],
+        f"Pedido #{pedido['id']} listo para retirar",
+        _cuerpo_listo(pedido),
     )
-    estado, detalle = send_email(pedido["email"], f"Pedido #{pedido['id']} listo para retirar", cuerpo)
     _registrar(order_id, "listo", pedido["email"], estado, detalle)
