@@ -183,14 +183,15 @@ notebook Windows.
 impresión; recién cuando funcione, compilar. Depurar un `.exe` es mucho más
 lento.
 
-### 5. Activar los pedidos en la web
+### 5. Activar los pedidos en la web — ✅ hecho (2026-08-19)
 
-Hoy `/fotocopias` y `/fotos` muestran un aviso de "pedidos en preparación" con
-botón de WhatsApp, en vez del formulario. Es a propósito: sin túnel, el
-formulario no tendría a dónde enviar.
+`public_html/config.js` tiene `PRINTNET_API: "https://api.libreriaglaxara.com.ar"`.
+El formulario de `/fotocopias` reemplazó al aviso de "pedidos en preparación".
+Verificado en el navegador: la página carga la configuración correcta, muestra
+el formulario y no tira errores de consola. El CORS del backend acepta los dos
+dominios (con y sin `www`) y rechaza cualquier otro.
 
-Para activarlos: editar `config.js` en cPanel y poner la URL del túnel en
-`PRINTNET_API`. Nada más.
+**El sitio está tomando pedidos reales.**
 
 ---
 
@@ -250,6 +251,14 @@ pedidos A3, porque un cliente que sube un PDF A3 y paga A4 imprimiría en A3.
 `RICOH IM C4500 A3`). La segunda se creó intentando resolver lo anterior y
 **no sirvió**. Es inofensiva, pero se puede borrar: el código usa solo la
 primera.
+
+**Recompilar la web apaga los pedidos, en silencio.** El `config.js` que está
+publicado en cPanel tiene la URL del backend, pero el del repositorio
+(`frontend/public/config.js` y `frontend/dist/config.js`) la tiene **vacía**.
+Si alguien recompila el frontend y sube todo, pisa el archivo del servidor,
+`PEDIDOS_HABILITADOS` pasa a false y la web vuelve a mostrar "pedidos en
+preparación" sin ningún error a la vista. Después de cada deploy hay que
+volver a poner la URL en `public_html/config.js`.
 
 **La impresora está en la red, no en el USB.** El puerto es
 `IP_192.168.10.128`. Bueno: no depende de que esté enchufada a esa notebook en
