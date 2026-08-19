@@ -21,19 +21,46 @@ from database import get_conn
 logger = logging.getLogger("printnet.notifications")
 
 
+TIMEOUT_SEG = 20
+
+# Puerto de SMTP sobre SSL directo ("SMTPS"). Distinto de STARTTLS, que empieza
+# la conexión sin cifrar y la asciende después.
+PUERTO_SSL = 465
+
+
 def _smtp_config() -> dict:
+    puerto = int(os.environ.get("PRINTNET_SMTP_PORT", "587"))
+    ssl_explicito = os.environ.get("PRINTNET_SMTP_SSL", "").strip()
     return {
         "host": os.environ.get("PRINTNET_SMTP_HOST", ""),
-        "port": int(os.environ.get("PRINTNET_SMTP_PORT", "587")),
+        "port": puerto,
         "user": os.environ.get("PRINTNET_SMTP_USER", ""),
         "password": os.environ.get("PRINTNET_SMTP_PASSWORD", ""),
         "from": os.environ.get("PRINTNET_SMTP_FROM", "pedidos@printnet.local"),
         "starttls": os.environ.get("PRINTNET_SMTP_STARTTLS", "1") == "1",
+        # El hosting de Glaxara solo ofrece 465 (SSL) o 9025 (sin cifrar): no
+        # tiene 587. Por eso se deduce del puerto en vez de exigir configurarlo,
+        # que es justo el detalle que se olvida y da "no se pudo conectar" sin
+        # más explicación. PRINTNET_SMTP_SSL lo fuerza si hiciera falta.
+        "ssl": (ssl_explicito == "1") if ssl_explicito else (puerto == PUERTO_SSL),
     }
 
 
-def send_email(destinatario: str, asunto: str, cuerpo: str) -> tuple[str, str]:
-    """Envía un email. Devuelve (estado, detalle) para registrar en la DB."""
+def _conectar(cfg: dict):
+    """Abre la conexión SMTP según la configuración."""
+    if cfg["ssl"]:
+        return smtplib.SMTP_SSL(cfg["host"], cfg["port"], timeout=TIMEOUT_SEG)
+    smtp = smtplib.SMTP(cfg["host"], cfg["port"], timeout=TIMEOUT_SEG)
+    if cfg["starttls"]:
+        smtp.starttls()
+    return smtp
+
+
+def send_email(destinatario: str, asunto: str, cuerpo: str, conectar=None) -> tuple[str, str]:
+    """Envía un email. Devuelve (estado, detalle) para registrar en la DB.
+
+    `conectar` es inyectable para poder testear sin un servidor de correo.
+    """
     cfg = _smtp_config()
     if not cfg["host"]:
         detalle = f"SMTP no configurado; email simulado a {destinatario}: {asunto}"
@@ -47,9 +74,7 @@ def send_email(destinatario: str, asunto: str, cuerpo: str) -> tuple[str, str]:
     msg.set_content(cuerpo)
 
     try:
-        with smtplib.SMTP(cfg["host"], cfg["port"], timeout=20) as smtp:
-            if cfg["starttls"]:
-                smtp.starttls()
+        with (conectar or _conectar)(cfg) as smtp:
             if cfg["user"]:
                 smtp.login(cfg["user"], cfg["password"])
             smtp.send_message(msg)
