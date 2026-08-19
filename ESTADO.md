@@ -169,9 +169,21 @@ caracteres, `/admin/*` responde 503 en vez de abrirse. Para generar otro:
 python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
-El `admin123` de `Admin.jsx:94` sigue ahí y **no hay que tocarlo todavía**: ese
-panel usa datos mock y no llama al backend. Cuando se conecte, el header entra
-como parte de ese trabajo.
+**El panel de operador ya usa el token** (`frontend/src/adminAuth.js`). Se pega
+una vez por navegador, en la pantalla de ingreso, y queda guardado en
+`localStorage`. Se valida contra el backend antes de dejar entrar, así un token
+mal pegado se detecta en el momento.
+
+El `admin123` que se validaba en el navegador ya no existe.
+
+Aclaración, porque el comentario del código decía lo contrario y costó una
+confusión: **el panel nunca fue una maqueta**. Los pedidos vienen del backend y
+se refrescan cada 15 s; los botones de estado llaman a `PATCH /admin/orders/{id}`.
+Lo único de relleno es la lista de impresoras cuando `/admin/printers` no
+responde — si ves "HP LaserJet 1", el backend no contestó.
+
+**El token no va en `config.js`:** ese archivo lo sirve la web y lo puede leer
+cualquiera.
 
 ### 4. Compilar el `.exe` e instalarlo como servicio
 
