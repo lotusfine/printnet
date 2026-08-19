@@ -21,7 +21,7 @@ Cliente
   ├─→ www.libreriaglaxara.com.ar          la web (archivos estáticos en cPanel)
   │
   └─→ api.libreriaglaxara.com.ar          el backend, vía túnel de Cloudflare
-            │                              (PENDIENTE de crear)
+            │                              (✅ funcionando)
             ▼
       notebook en el local  ──→  Ricoh IM C4500
 ```
@@ -88,19 +88,31 @@ Trampa al copiar el archivo: Windows le saca el punto inicial y lo deja como
 `env`. Hay que renombrarlo a `.env` con `Rename-Item`, porque el Explorador no
 deja crear nombres que empiecen con punto.
 
-### 1. Túnel de Cloudflare — *ya se puede hacer*
+### 1. Túnel de Cloudflare — ✅ creado y funcionando (2026-08-19)
 
-El dominio está en Cloudflare, así que el prerequisito está cumplido. Falta:
+`https://api.libreriaglaxara.com.ar` responde desde internet. Verificado desde
+otra máquina y otra red: la raíz devuelve 200, y `/admin/*` devuelve 401 tanto
+sin token como con uno inventado.
 
-```bash
-cloudflared tunnel login
-cloudflared tunnel create printnet
-cloudflared tunnel route dns printnet api.libreriaglaxara.com.ar
-```
+| Dato | Valor |
+|---|---|
+| Nombre del túnel | `printnet` |
+| ID | `b34cbdf0-01d6-47e6-b73d-2c5851b9e37f` |
+| Credenciales | `C:\Users\marcelo\.cloudflared\b34cbdf0-...json` |
+| Configuración | `C:\Users\marcelo\.cloudflared\config.yml` |
+| Usuario de Windows | **marcelo** |
 
-Hasta ahora se venían usando **túneles rápidos** (`trycloudflare.com`), cuya
-URL **cambia en cada arranque** — eso obligaba a reconfigurar tres lugares cada
-vez. Con el túnel nombrado la dirección queda fija para siempre.
+Se levanta a mano con `cloudflared tunnel run printnet`, en su propia ventana.
+Convertirlo en servicio es parte del punto 4.
+
+**Trampa para cuando sea servicio:** las credenciales y el `cert.pem` viven en
+la carpeta personal de `marcelo`. El servicio corre bajo otra cuenta que no la
+ve — hay que pasarle `--config` y `TUNNEL_ORIGIN_CERT`. `deploy/install-services.ps1`
+ya lo contempla.
+
+**Pendiente menor:** `/docs` y `/openapi.json` quedaron públicos. No filtran
+datos, pero publican la lista completa de endpoints, incluidos los de admin.
+Conviene desactivarlos en producción.
 
 ### 2. La impresión: ✅ probada de punta a punta y funcionando
 
@@ -279,7 +291,7 @@ en el hosting, fuera de la carpeta pública.
 2. ~~Probar la impresión real~~ ✅ (2026-08-14)
 3. ~~Pedido completo de punta a punta, con el backend levantado~~ ✅ (2026-08-19)
 4. ~~Copiarle el `.env` a la notebook~~ ✅ (2026-08-19)
-5. Crear el túnel nombrado **+ la seguridad del admin en la misma sesión**
+5. ~~Crear el túnel nombrado + la seguridad del admin~~ ✅ (2026-08-19)
 6. Probar un pedido con pago real de MercadoPago (necesita el túnel)
 7. Compilar el `.exe` e instalar como servicio
 8. Activar los pedidos en `config.js`
