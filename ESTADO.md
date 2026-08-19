@@ -84,7 +84,21 @@ Hasta ahora se venían usando **túneles rápidos** (`trycloudflare.com`), cuya
 URL **cambia en cada arranque** — eso obligaba a reconfigurar tres lugares cada
 vez. Con el túnel nombrado la dirección queda fija para siempre.
 
-### 2. La impresión: ✅ probada contra la Ricoh y funcionando
+### 2. La impresión: ✅ probada de punta a punta y funcionando
+
+**El circuito completo anda (2026-08-19).** Un pedido creado contra la API
+—como lo haría un cliente— se cotiza, se guarda, se despacha solo y sale en
+papel. Probado en la notebook con la Ricoh, en modo fantasma (sin MercadoPago,
+que es lo único que todavía falta ejercitar y necesita el túnel).
+
+Para repetirlo, con el backend levantado en otra ventana:
+
+```
+$env:PRINTNET_DISPATCH="sumatra"; $env:PRINTNET_SUMATRA="C:\PrintNet\SumatraPDF.exe"
+.venv\Scripts\python run_server.py          # ventana 1
+.venv\Scripts\python prueba_pedido.py       # ventana 2
+```
+
 
 **Probado el 2026-08-14 con la impresora real.** Salieron hojas de verdad, con
 blanco y negro, color, doble faz, copias múltiples, rango de páginas y ambos
@@ -254,8 +268,9 @@ en el hosting, fuera de la carpeta pública.
 
 1. ~~Clonar el repo en la notebook~~ ✅
 2. ~~Probar la impresión real~~ ✅ (2026-08-14)
-3. Copiarle el `.env` a la notebook (a mano, no va por git)
-4. Probar un pedido completo de punta a punta con el backend levantado
+3. ~~Pedido completo de punta a punta, con el backend levantado~~ ✅ (2026-08-19)
+4. Copiarle el `.env` a la notebook (a mano, no va por git)
 5. Crear el túnel nombrado **+ la seguridad del admin en la misma sesión**
-6. Compilar el `.exe` e instalar como servicio
-7. Activar los pedidos en `config.js`
+6. Probar un pedido con pago real de MercadoPago (necesita el túnel)
+7. Compilar el `.exe` e instalar como servicio
+8. Activar los pedidos en `config.js`
