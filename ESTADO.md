@@ -109,42 +109,35 @@ vez. Con el túnel nombrado la dirección queda fija para siempre.
 papel. Probado en la notebook con la Ricoh, en modo fantasma (sin MercadoPago,
 que es lo único que todavía falta ejercitar y necesita el túnel).
 
-Para repetirlo, con el backend levantado en otra ventana:
+Antes, el 2026-08-14, se había verificado la impresión sola contra la Ricoh:
+blanco y negro, color, doble faz, copias múltiples, rango de páginas y ambos
+tamaños, uno por uno — incluido A4→A3 y A3→A4, que son los que garantizan que
+lo impreso coincida con lo cobrado.
+
+**El entorno de la notebook:** Python 3.11.9 (la misma que el Mac), repo en
+`C:\PrintNet\printnet`, SumatraPDF en `C:\PrintNet\SumatraPDF.exe`, y el
+`.env` ya puesto (ver punto 0). La impresora se llama exactamente
+`RICOH IM C4500 PCL 6` y está en la red.
+
+**Cómo repetir la prueba**, en dos ventanas de PowerShell:
 
 ```
-$env:PRINTNET_DISPATCH="sumatra"; $env:PRINTNET_SUMATRA="C:\PrintNet\SumatraPDF.exe"
-.venv\Scripts\python run_server.py          # ventana 1
+cd C:\PrintNet\printnet\backend-printnet
+.venv\Scripts\python run_server.py          # ventana 1: queda ocupada
 .venv\Scripts\python prueba_pedido.py       # ventana 2
 ```
 
-
-**Probado el 2026-08-14 con la impresora real.** Salieron hojas de verdad, con
-blanco y negro, color, doble faz, copias múltiples, rango de páginas y ambos
-tamaños verificados uno por uno — incluido A4→A3 y A3→A4, que son los que
-garantizan que lo impreso coincida con lo cobrado.
-
-El entorno de la notebook quedó armado: Python 3.11.9 (la misma que el Mac),
-repo en `C:\PrintNet\printnet`, SumatraPDF en `C:\PrintNet\SumatraPDF.exe`.
-La impresora se llama exactamente `RICOH IM C4500 PCL 6` y está en la red.
-
-Para imprimir de verdad hay que poner en el `.env`:
+Y para probar la impresora sin levantar el backend:
 
 ```
-PRINTNET_DISPATCH=sumatra
-PRINTNET_SUMATRA=C:\PrintNet\SumatraPDF.exe
+python generar_pdf_prueba.py --paginas 4 --tamano A3 --salida C:\PrintNet\p.pdf
+python prueba_impresion.py C:\PrintNet\p.pdf --tamano A3 --simular
 ```
 
 El tamaño de papel fue lo que más costó: SumatraPDF ignora `paper=`, `bin=` y
 la configuración de la cola, y toma el tamaño del **PDF**. Se resolvió
 normalizando el documento antes de imprimir (`pdf_normalize.py`) y quedó
 verificado en las dos direcciones contra la impresora.
-
-Herramientas para probar sin levantar el backend:
-
-```
-python generar_pdf_prueba.py --paginas 4 --tamano A3 --salida C:\PrintNet\p.pdf
-python prueba_impresion.py C:\PrintNet\p.pdf --tamano A3 --simular
-```
 
 **Ojo:** `ok=True` significa *"se encoló"*, no *"salió el papel"*. Si la
 impresora se traba, el pedido igual figura despachado. Verificar la cola de
