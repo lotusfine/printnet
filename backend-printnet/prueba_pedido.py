@@ -51,7 +51,17 @@ def main() -> int:
     p.add_argument("--tamano", choices=["A4", "A3"], default="A4",
                    help="Tamaño que pide el cliente (lo que se cobra)")
     p.add_argument("--rango", default="", help='Ej. "2-3". Vacío = todas')
+    p.add_argument("--email", help="Dirección del cliente. Por defecto usa una "
+                                   "inventada, que NO recibe nada: para probar "
+                                   "el envío de mails hay que poner una real.")
+    p.add_argument("--nombre", help="Nombre del cliente de prueba")
     args = p.parse_args()
+
+    contacto = dict(CONTACTO_PRUEBA)
+    if args.email:
+        contacto["email"] = args.email
+    if args.nombre:
+        contacto["nombre"] = args.nombre
 
     if args.pdf:
         ruta = args.pdf
@@ -64,7 +74,7 @@ def main() -> int:
 
     datos = {
         "tipo": "fotocopias",
-        "contacto": CONTACTO_PRUEBA,
+        "contacto": contacto,
         "opciones": {
             "color": args.color,
             "caras": args.caras,
@@ -78,6 +88,10 @@ def main() -> int:
 
     print(f"\nPedido: {args.color}, {args.caras} faz, {args.copias} copia(s), "
           f"{args.tamano}, {args.rango or 'todas las páginas'}")
+    print(f"Cliente: {contacto['nombre']} <{contacto['email']}>")
+    if not args.email:
+        print("  (dirección inventada: no va a llegar ningún mail. "
+              "Usá --email tu@correo.com para probar el envío)")
     print(f"Backend: {args.url}")
 
     try:
