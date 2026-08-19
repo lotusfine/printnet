@@ -161,10 +161,16 @@ MIGRACIONES: list[tuple[int, str]] = [
     (1, _MIGRACION_1),
 ]
 
-# Mismas impresoras que muestra el mock de /admin
+# La impresora del local. El nombre tiene que ser EXACTAMENTE el que le da
+# Windows: el despachador lo saca de acá y se lo pasa a SumatraPDF, que
+# compara carácter por carácter. Si no coincide, el pedido falla con un error
+# que no menciona que el problema sea el nombre.
+#
+# Configurable por si se cambia de equipo o se prueba en otra máquina.
+IMPRESORA_LOCAL = os.environ.get("PRINTNET_IMPRESORA", "RICOH IM C4500 PCL 6")
+
 SEED_PRINTERS = [
-    ("HP LaserJet 1", "laser", "error", "Tóner bajo", 150, 15),
-    ("Epson L3250", "tinta", "activa", None, 340, 80),
+    (IMPRESORA_LOCAL, "laser", "activa", None, 0, 100),
 ]
 
 
