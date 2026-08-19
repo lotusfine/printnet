@@ -70,23 +70,19 @@ Administrador de archivos de cPanel y el cambio es inmediato.
 
 ## ⬜ Pendiente
 
-### 0. El `.env` de la notebook — ✅ copiado, con dos pendientes
+### 0. El `.env` de la notebook — ✅ completo (2026-08-19)
 
-Está en `C:\PrintNet\printnet\backend-printnet\.env` (2026-08-19) y el sistema
-imprime leyéndolo. **Dos cosas quedaron deliberadamente a medias, y las dos se
-resuelven el día del túnel:**
-
-- **`MP_ACCESS_TOKEN` está comentado con `#`.** A propósito: sin túnel,
-  MercadoPago no puede avisarnos de los pagos, así que activarlo solo lograría
-  que los pedidos queden en `pendiente_pago` sin imprimir nunca. Con el token
-  comentado el backend corre en modo fantasma y se puede probar la impresión.
-  **Descomentarlo cuando el túnel exista.**
-- **`BASE_URL_PUBLICA` apunta a un túnel rápido que ya no existe.** Hay que
-  reemplazarlo por `https://api.libreriaglaxara.com.ar`.
+Está en `C:\PrintNet\printnet\backend-printnet\.env`, con MercadoPago activo,
+`BASE_URL_PUBLICA=https://api.libreriaglaxara.com.ar`, el token del admin y el
+despachador apuntando a SumatraPDF.
 
 Trampa al copiar el archivo: Windows le saca el punto inicial y lo deja como
 `env`. Hay que renombrarlo a `.env` con `Rename-Item`, porque el Explorador no
 deja crear nombres que empiecen con punto.
+
+Otra trampa, que ya nos costó una vuelta: **el servidor lee el `.env` una sola
+vez, al arrancar.** Después de tocarlo hay que reiniciarlo. Lo mismo vale
+después de un `git pull`: el código viejo sigue en memoria.
 
 ### 1. Túnel de Cloudflare — ✅ creado y funcionando (2026-08-19)
 
@@ -162,10 +158,12 @@ Windows quedó fuera de alcance a propósito.
 los endpoints respondían a cualquiera que supiera la URL, con nombres,
 teléfonos y emails de clientes reales adentro.
 
-**Falta un paso tuyo antes de abrir el túnel:** generar el token y ponerlo en
-el `.env` de la notebook. Si no está, `/admin/*` responde 503 — se falla
-cerrado a propósito, así que el olvido se nota en el acto en vez de quedar
-abierto en silencio.
+El token ya está puesto en el `.env` de la notebook, y quedó **verificado
+contra la dirección pública**: `/admin/*` devuelve 401 desde internet, sin
+token y con uno inventado.
+
+Se falla cerrado: si `PRINTNET_ADMIN_TOKEN` falta o tiene menos de 16
+caracteres, `/admin/*` responde 503 en vez de abrirse. Para generar otro:
 
 ```
 python -c "import secrets; print(secrets.token_urlsafe(32))"
