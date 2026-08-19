@@ -70,6 +70,24 @@ Administrador de archivos de cPanel y el cambio es inmediato.
 
 ## ⬜ Pendiente
 
+### 0. El `.env` de la notebook — ✅ copiado, con dos pendientes
+
+Está en `C:\PrintNet\printnet\backend-printnet\.env` (2026-08-19) y el sistema
+imprime leyéndolo. **Dos cosas quedaron deliberadamente a medias, y las dos se
+resuelven el día del túnel:**
+
+- **`MP_ACCESS_TOKEN` está comentado con `#`.** A propósito: sin túnel,
+  MercadoPago no puede avisarnos de los pagos, así que activarlo solo lograría
+  que los pedidos queden en `pendiente_pago` sin imprimir nunca. Con el token
+  comentado el backend corre en modo fantasma y se puede probar la impresión.
+  **Descomentarlo cuando el túnel exista.**
+- **`BASE_URL_PUBLICA` apunta a un túnel rápido que ya no existe.** Hay que
+  reemplazarlo por `https://api.libreriaglaxara.com.ar`.
+
+Trampa al copiar el archivo: Windows le saca el punto inicial y lo deja como
+`env`. Hay que renombrarlo a `.env` con `Rename-Item`, porque el Explorador no
+deja crear nombres que empiecen con punto.
+
 ### 1. Túnel de Cloudflare — *ya se puede hacer*
 
 El dominio está en Cloudflare, así que el prerequisito está cumplido. Falta:
@@ -269,7 +287,7 @@ en el hosting, fuera de la carpeta pública.
 1. ~~Clonar el repo en la notebook~~ ✅
 2. ~~Probar la impresión real~~ ✅ (2026-08-14)
 3. ~~Pedido completo de punta a punta, con el backend levantado~~ ✅ (2026-08-19)
-4. Copiarle el `.env` a la notebook (a mano, no va por git)
+4. ~~Copiarle el `.env` a la notebook~~ ✅ (2026-08-19)
 5. Crear el túnel nombrado **+ la seguridad del admin en la misma sesión**
 6. Probar un pedido con pago real de MercadoPago (necesita el túnel)
 7. Compilar el `.exe` e instalar como servicio
