@@ -58,6 +58,12 @@ tramo).
 "imprimiendo", despacho registrado. Neto recibido $191,39 (comisión de MP
 $8,61).
 
+**El circuito completo, en producción y de punta a punta (2026-08-19).** Un
+pedido hecho desde la web pública, pagado con dinero real, notificado por el
+webhook a través del túnel definitivo, impreso en la Ricoh, y despachado desde
+el panel de operador (`imprimiendo → listo → entregado`). Es el sistema entero
+funcionando como lo va a usar un cliente y el mostrador.
+
 **Dominio migrado a Cloudflare** (2026-08-19). Se replicaron los 24 registros
 de la zona; el DKIM se verificó carácter por carácter (409 caracteres,
 idéntico) antes de delegar. Correo, sitio y servicios intactos.
@@ -112,10 +118,8 @@ Conviene desactivarlos en producción.
 
 ### 2. La impresión: ✅ probada de punta a punta y funcionando
 
-**El circuito completo anda (2026-08-19).** Un pedido creado contra la API
-—como lo haría un cliente— se cotiza, se guarda, se despacha solo y sale en
-papel. Probado en la notebook con la Ricoh, en modo fantasma (sin MercadoPago,
-que es lo único que todavía falta ejercitar y necesita el túnel).
+**El circuito completo anda (2026-08-19)**, incluido el pago real: un pedido
+hecho desde la web se cotiza, se cobra, se despacha solo y sale en papel.
 
 Antes, el 2026-08-14, se había verificado la impresión sola contra la Ricoh:
 blanco y negro, color, doble faz, copias múltiples, rango de páginas y ambos
@@ -185,7 +189,14 @@ responde — si ves "HP LaserJet 1", el backend no contestó.
 **El token no va en `config.js`:** ese archivo lo sirve la web y lo puede leer
 cualquiera.
 
-### 4. Compilar el `.exe` e instalarlo como servicio
+### 4. Compilar el `.exe` e instalarlo como servicio — ⬅️ ES LO ÚNICO QUE FALTA
+
+> Hoy el backend y el túnel corren en dos ventanas de PowerShell abiertas a
+> mano. **El sitio está tomando pedidos reales en ese estado.** Si alguien
+> cierra una ventana, o la notebook se reinicia o se suspende, el formulario
+> deja de funcionar. No se pierde plata (sin backend no se crea ni se cobra el
+> pedido), pero el cliente se topa con algo roto.
+
 
 Todo preparado en `backend-printnet/deploy/` (spec de PyInstaller, scripts NSSM,
 instalador Inno Setup). PyInstaller **no cross-compila**: hay que hacerlo en la
@@ -311,6 +322,6 @@ en el hosting, fuera de la carpeta pública.
 3. ~~Pedido completo de punta a punta, con el backend levantado~~ ✅ (2026-08-19)
 4. ~~Copiarle el `.env` a la notebook~~ ✅ (2026-08-19)
 5. ~~Crear el túnel nombrado + la seguridad del admin~~ ✅ (2026-08-19)
-6. Probar un pedido con pago real de MercadoPago (necesita el túnel)
+6. ~~Probar un pedido con pago real de MercadoPago~~ ✅ (2026-08-19)
 7. Compilar el `.exe` e instalar como servicio
 8. Activar los pedidos en `config.js`
