@@ -5,24 +5,33 @@ arrancan solos al prender la máquina, se reinician si se caen, y no necesitás
 abrir ninguna terminal.
 
 ```
-Vercel (printnet.vercel.app)
+www.libreriaglaxara.com.ar (cPanel)
       │
       ▼
 Cloudflare  ──túnel 'printnet'──►  notebook
-                                     ├── servicio PrintNetTunnel  (cloudflared)
+   api.libreriaglaxara.com.ar        ├── servicio PrintNetTunnel  (cloudflared)
                                      └── servicio PrintNetBackend (FastAPI + SQLite)
 ```
 
 ---
 
-## Parte 0 — Crear el túnel nombrado `printnet` (PREREQUISITO)
+## Parte 0 — Crear el túnel nombrado `printnet` — ✅ YA ESTÁ HECHO
 
-> **Estado al 2026-08-19:** el dominio `libreriaglaxara.com.ar` YA está migrado
-> a Cloudflare, así que el punto 0.1 (dominio) está cumplido. Falta ejecutar
-> 0.2 en adelante.
+> **Estado al 2026-08-19: esta parte entera está cumplida.** El túnel `printnet`
+> existe, `api.libreriaglaxara.com.ar` responde desde internet, y el `.env` de
+> la notebook ya apunta ahí. **Saltá directo a la Parte 1.**
 >
-> Salteá esta parte solo si `cloudflared tunnel list` ya muestra un túnel
-> llamado `printnet`.
+> Datos del túnel ya creado:
+>
+> | Dato | Valor |
+> |---|---|
+> | Nombre | `printnet` |
+> | UUID | `b34cbdf0-01d6-47e6-b73d-2c5851b9e37f` |
+> | Credenciales | `C:\Users\marcelo\.cloudflared\b34cbdf0-...json` |
+> | `cert.pem` | `C:\Users\marcelo\.cloudflared\cert.pem` |
+> | Hostname | `api.libreriaglaxara.com.ar` |
+>
+> Lo que sigue queda como referencia por si alguna vez hay que rehacerlo.
 
 Hay dos tipos de túnel y la diferencia importa mucho acá:
 
@@ -93,8 +102,9 @@ Al pasar del túnel rápido al nombrado cambia la URL pública, así que hay que
 actualizar **tres lugares** (esta es la última vez: el dominio ya no cambia más):
 
 1. **`.env`** → `BASE_URL_PUBLICA=https://api.tudominio.com`
-2. **Vercel** → variable `VITE_PRINTNET_API` con la URL nueva + **redeploy**
-   (es variable de build: sin redeploy el sitio sigue apuntando al túnel viejo)
+2. **`public_html/config.js`** en cPanel → `PRINTNET_API: "https://api.tudominio.com"`.
+   Se edita en el servidor y el cambio es inmediato, sin recompilar. (Antes el
+   sitio estaba en Vercel y esto era una variable de build; ya no.)
 3. **MercadoPago** → panel de la aplicación → Webhooks → URL
    `https://api.tudominio.com/webhooks/mercadopago`. Si MP regenera la firma
    secreta, actualizá también `MP_WEBHOOK_SECRET` en el `.env`.
@@ -185,17 +195,32 @@ figura en `BASE_URL_PUBLICA` del `.env` y en la URL del webhook de MercadoPago.
 
 ### `.env`
 
-Copiá `backend-printnet\.env.example` y completá los valores reales:
+**No lo armes de cero: copiá el que ya funciona**, el de
+`C:\PrintNet\printnet\backend-printnet\.env`. Está completo y probado en
+producción, así que copiarlo evita olvidarse una variable.
+
+Si aun así hay que rehacerlo, estas son las que no pueden faltar:
 
 ```
-MP_ACCESS_TOKEN=...            (cuenta vendedora de prueba)
-MP_WEBHOOK_SECRET=...          (firma secreta del webhook de ESA app)
-BASE_URL_PUBLICA=https://<tu-subdominio>.<tu-dominio>.com
-PRINTNET_FRONTEND_URL=https://printnet.vercel.app
-PRINTNET_SMTP_HOST=...         (vacío = los mails se simulan y loguean)
-PRINTNET_SMTP_USER=...
-PRINTNET_SMTP_PASSWORD=...
+MP_ACCESS_TOKEN=...            credenciales de PRODUCCIÓN
+MP_WEBHOOK_SECRET=...          firma secreta del webhook de ESA app
+BASE_URL_PUBLICA=https://api.libreriaglaxara.com.ar
+PRINTNET_FRONTEND_URL=https://www.libreriaglaxara.com.ar
+PRINTNET_ADMIN_TOKEN=...       SIN ESTO EL PANEL DE ADMIN NO ABRE (503)
+PRINTNET_DISPATCH=sumatra      sin esto NO IMPRIME (queda en modo simulado)
+PRINTNET_SUMATRA=C:\PrintNet\SumatraPDF.exe
+PRINTNET_CORS_ORIGINS=https://libreriaglaxara.com.ar,https://www.libreriaglaxara.com.ar
+PRINTNET_SMTP_HOST=...         vacío = los mails se simulan y loguean
 ```
+
+Las tres marcadas son las que se olvidan y fallan en silencio o con un error
+que no dice cuál es la causa.
+
+**Ojo con SumatraPDF:** el `.exe` del backend se instala en
+`C:\Program Files\PrintNet\`, pero `PRINTNET_SUMATRA` sigue apuntando a
+`C:\PrintNet\SumatraPDF.exe`. Esa carpeta tiene que seguir existiendo, y la
+cuenta del servicio necesita permiso de **escritura** ahí, porque SumatraPDF
+guarda su configuración al lado del ejecutable.
 
 Con un túnel **nombrado** el dominio es fijo: ya no hay que actualizar la URL
 cada vez que reinicia, como pasaba con los túneles rápidos.
