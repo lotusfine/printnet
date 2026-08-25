@@ -24,6 +24,7 @@ Herramienta de diagnóstico, no parte del servidor.
 
 import argparse
 import json
+import os
 import sys
 import tempfile
 
@@ -41,7 +42,9 @@ CONTACTO_PRUEBA = {
 def main() -> int:
     p = argparse.ArgumentParser(description="Crea un pedido de prueba de punta a punta.")
     p.add_argument("--url", default="http://localhost:8000", help="Backend")
-    p.add_argument("--pdf", help="PDF a subir (si no, se genera uno)")
+    p.add_argument("--archivo", "--pdf", dest="archivo",
+                   help="Documento a subir: PDF, Word, Excel o PowerPoint. "
+                        "Si no se pasa, se genera un PDF de prueba.")
     p.add_argument("--paginas", type=int, default=4, help="Páginas del PDF generado")
     p.add_argument("--pdf-tamano", choices=["A4", "A3"], default="A4",
                    help="Tamaño de página del PDF generado (distinto del pedido)")
@@ -63,8 +66,8 @@ def main() -> int:
     if args.nombre:
         contacto["nombre"] = args.nombre
 
-    if args.pdf:
-        ruta = args.pdf
+    if args.archivo:
+        ruta = args.archivo
     else:
         f = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
         f.write(generar(args.paginas, args.pdf_tamano))
@@ -95,12 +98,15 @@ def main() -> int:
     print(f"Backend: {args.url}")
 
     try:
+        # El nombre real importa: el backend decide por la extensión si hay
+        # que convertir el documento antes de imprimirlo.
         with open(ruta, "rb") as fh:
             r = requests.post(
                 f"{args.url}/orders",
                 data={"datos": json.dumps(datos)},
-                files=[("files", ("prueba.pdf", fh, "application/pdf"))],
-                timeout=60,
+                files=[("files", (os.path.basename(ruta), fh,
+                                  "application/octet-stream"))],
+                timeout=120,
             )
     except requests.exceptions.ConnectionError:
         print(f"\nNo hay nadie escuchando en {args.url}.")
