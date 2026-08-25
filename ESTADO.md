@@ -324,4 +324,33 @@ en el hosting, fuera de la carpeta pública.
 5. ~~Crear el túnel nombrado + la seguridad del admin~~ ✅ (2026-08-19)
 6. ~~Probar un pedido con pago real de MercadoPago~~ ✅ (2026-08-19)
 7. Compilar el `.exe` e instalar como servicio
-8. Activar los pedidos en `config.js`
+8. ~~Activar los pedidos en `config.js`~~ ✅ (2026-08-19)
+
+---
+
+## Próxima tanda de mejoras (planificada el 2026-08-20)
+
+Tres planes escritos, ninguno implementado todavía. En orden de prioridad:
+
+| # | Qué | Plan | Tamaño |
+|---|---|---|---|
+| 1 | Que la web no invente "10 páginas" cuando no puede contarlas | [carga-de-archivos](docs/plan-carga-de-archivos.md) | chico |
+| 2 | Avisar el límite de tamaño y subirlo a 95 MB | [carga-de-archivos](docs/plan-carga-de-archivos.md) | chico |
+| 3 | Aceptar cualquier formato y convertirlo a PDF (LibreOffice) | [conversion-de-formatos](docs/plan-conversion-de-formatos.md) | grande |
+| 4 | Pedidos con varios documentos, cada uno con su configuración | [multiples-archivos](docs/plan-multiples-archivos.md) | el más grande |
+| 5 | Contar páginas en el navegador — solo si los errores reales lo justifican | [carga-de-archivos](docs/plan-carga-de-archivos.md) | mediano |
+
+**El 1 es el único urgente:** hoy, en producción, si la web no logra contar las
+páginas asume que son 10 y le cobra al cliente sobre ese número.
+
+**Decisiones pendientes que bloquean trabajo:**
+
+- **Tramos de precio con varios documentos: ¿por documento o sumando?** Tres
+  documentos de 10 páginas dan $6.000 o $4.500 según cómo se resuelva — 25% de
+  diferencia. Bloquea el motor de precios del punto 4.
+- ¿El cliente ve el PDF convertido antes de pagar? (define si hace falta
+  reestructurar la subida en el punto 3)
+- ¿Qué pasa si la conversión falla: se rechaza o entra como pedido a cotizar?
+- ¿Qué estado toma un pedido de varios documentos si uno imprime y otro no?
+
+LibreOffice ya está descargado en la notebook, sin instalar.
