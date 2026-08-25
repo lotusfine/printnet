@@ -120,19 +120,18 @@ def main() -> int:
 
     pedido = r.json()
     print("\n--- Pedido creado ---")
-    for campo in ("id", "token", "estado", "pagado", "precio", "init_point"):
-        if campo in pedido:
-            print(f"  {campo:12}: {pedido[campo]}")
+    # Se muestra todo lo que devuelva el backend: si algún día cambia el
+    # contrato, se ve acá en vez de desaparecer en silencio.
+    for campo, valor in pedido.items():
+        print(f"  {campo:16}: {valor}")
 
     token = pedido.get("token")
     if token:
         s = requests.get(f"{args.url}/orders/status/{token}", timeout=30)
         if s.ok:
-            estado = s.json()
             print("\n--- Estado consultado ---")
-            for campo in ("estado", "pagado", "paginas", "copias", "tamano", "precio"):
-                if campo in estado:
-                    print(f"  {campo:12}: {estado[campo]}")
+            for campo, valor in s.json().items():
+                print(f"  {campo:16}: {valor}")
 
     estado_final = pedido.get("estado")
     print()
