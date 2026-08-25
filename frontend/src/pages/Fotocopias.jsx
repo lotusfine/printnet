@@ -16,8 +16,12 @@ const DEFAULT_OPTIONS = {
   anillado: false,
 };
 
-// Páginas que se van a imprimir según el rango (espejo de pricing.py)
+// Páginas que se van a imprimir según el rango (espejo de pricing.py).
+// Devuelve null si todavía no sabemos cuántas páginas tiene el documento —
+// null significa "no sé", y nunca hay que reemplazarlo por un número
+// inventado: de ahí salía el precio equivocado que llegaba al cliente.
 const paginasEfectivas = (totalPaginas, rango) => {
+  if (totalPaginas == null) return null;
   if (rango.modo !== 'rango') return totalPaginas;
   const v = rango.valor.trim();
   if (!/^\d+(-\d+)?$/.test(v)) return totalPaginas;
@@ -127,7 +131,7 @@ const Fotocopias = () => {
           accent="amber"
         />
         <PrintOptions
-          pages={paginasEfectivas(fileInfo?.pages ?? 10, rango)}
+          pages={paginasEfectivas(fileInfo?.pages ?? null, rango)}
           options={options}
           onChange={(o) => { setOptions(o); setEnvio({ estado: 'idle' }); }}
         />
@@ -135,7 +139,7 @@ const Fotocopias = () => {
           fileInfo={fileInfo}
           options={options}
           pageRange={rango}
-          pagesACobrar={paginasEfectivas(fileInfo?.pages ?? 10, rango)}
+          pagesACobrar={paginasEfectivas(fileInfo?.pages ?? null, rango)}
           onPay={handlePay}
           enviando={envio.estado === 'enviando' || envio.estado === 'redirigiendo'}
         />

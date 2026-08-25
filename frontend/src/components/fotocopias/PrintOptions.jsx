@@ -149,24 +149,44 @@ const PrintOptions = ({ pages, options, onChange }) => {
           />
         </div>
 
-        {/* Precio */}
+        {/* Precio — solo cuando sabemos cuántas páginas tiene el documento.
+            Sin ese dato no hay precio posible, y mostrar uno inventado fue
+            exactamente el error que llegaba al cliente. */}
         <div className="mt-2 pt-4 border-t border-amber-200">
-          <div className="flex justify-between items-center">
-            <span className="text-xs font-bold uppercase tracking-widest text-stone-400">Precio estimado</span>
-            <span className="text-2xl font-black text-amber-700">
-              ${calcPrice(pages, options).toLocaleString('es-AR')}
-            </span>
-          </div>
-          <p className="text-[10px] text-stone-400 mt-1 text-right">
-            {pages} págs · {options.caras === 'doble' ? `${Math.ceil(pages / 2)} hojas (doble faz)` : `${pages} hojas`} · {options.copias} cop. · {options.tamano}
-          </p>
-          <p className="text-[10px] text-stone-400 text-right">
-            {(() => {
-              const hojas = options.caras === 'doble' ? Math.ceil(pages / 2) : pages;
-              const total = hojas * options.copias;
-              return `${total} ${options.caras === 'doble' ? 'hojas' : 'copias'} × $${precioUnitario(options.color, options.caras, total).toLocaleString('es-AR')} c/u`;
-            })()}
-          </p>
+          {pages == null ? (
+            <p className="text-xs text-stone-400 text-center py-2">
+              Subí tu documento para ver el precio.
+            </p>
+          ) : (
+            <>
+              <div className="flex justify-between items-center">
+                <span className="text-xs font-bold uppercase tracking-widest text-stone-400">Precio estimado</span>
+                <span className="text-2xl font-black text-amber-700">
+                  ${calcPrice(pages, options).toLocaleString('es-AR')}
+                </span>
+              </div>
+              <p className="text-[10px] text-stone-400 mt-1 text-right">
+                {(() => {
+                  const hojas = options.caras === 'doble' ? Math.ceil(pages / 2) : pages;
+                  const pl = (n, sing, plur) => `${n} ${n === 1 ? sing : plur}`;
+                  const detalleHojas = options.caras === 'doble'
+                    ? `${pl(hojas, 'hoja', 'hojas')} (doble faz)`
+                    : pl(hojas, 'hoja', 'hojas');
+                  return `${pl(pages, 'página', 'páginas')} · ${detalleHojas} · ${pl(options.copias, 'copia', 'copias')} · ${options.tamano}`;
+                })()}
+              </p>
+              <p className="text-[10px] text-stone-400 text-right">
+                {(() => {
+                  const hojas = options.caras === 'doble' ? Math.ceil(pages / 2) : pages;
+                  const total = hojas * options.copias;
+                  const unidad = options.caras === 'doble'
+                    ? (total === 1 ? 'hoja' : 'hojas')
+                    : (total === 1 ? 'copia' : 'copias');
+                  return `${total} ${unidad} × $${precioUnitario(options.color, options.caras, total).toLocaleString('es-AR')} c/u`;
+                })()}
+              </p>
+            </>
+          )}
         </div>
       </div>
     </article>

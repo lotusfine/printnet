@@ -30,7 +30,14 @@ router = APIRouter()
 
 _pedido_adapter = TypeAdapter(Pedido)
 
-MAX_FILE_BYTES = 50 * 1024 * 1024  # 50 MB por archivo
+# ESPEJADO EN frontend/src/limites.js (MAX_ARCHIVO_MB). Si se cambia acá hay
+# que cambiarlo allá, o la web deja subir algo que después se rechaza.
+#
+# 95 y no 100 porque Cloudflare, en el plan gratuito, corta las peticiones de
+# más de 100 MB. Dejando el límite propio un poco abajo, el cliente recibe
+# nuestro mensaje y no un error de Cloudflare que no podemos redactar.
+MAX_FILE_MB = 95
+MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024
 
 IMAGEN_CT = re.compile(r"^image/")
 
@@ -77,7 +84,7 @@ def _guardar_archivos(token: str, files: list[UploadFile]) -> list[dict]:
         path = destino / candidato
         data = f.file.read(MAX_FILE_BYTES + 1)
         if len(data) > MAX_FILE_BYTES:
-            raise HTTPException(413, f"'{nombre}' supera el máximo de 50 MB")
+            raise HTTPException(413, f"'{nombre}' supera el máximo de {MAX_FILE_MB} MB")
         path.write_bytes(data)
 
         guardados.append(
@@ -127,7 +134,7 @@ def contar_paginas(file: UploadFile = File(...)):
 
         data = file.file.read(MAX_FILE_BYTES + 1)
         if len(data) > MAX_FILE_BYTES:
-            raise HTTPException(413, "el archivo supera el máximo de 50 MB")
+            raise HTTPException(413, f"el archivo supera el máximo de {MAX_FILE_MB} MB")
         paginas = len(PdfReader(io.BytesIO(data)).pages)
     except HTTPException:
         raise
