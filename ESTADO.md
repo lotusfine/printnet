@@ -5,7 +5,7 @@
 > técnico del backend está en `backend-printnet/SPEC.md`; el de la instalación
 > en Windows, en `backend-printnet/deploy/README.md`.
 >
-> Última actualización: **2026-08-19**
+> Última actualización: **2026-08-25**
 
 ---
 
