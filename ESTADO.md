@@ -328,29 +328,56 @@ en el hosting, fuera de la carpeta pública.
 
 ---
 
-## Próxima tanda de mejoras (planificada el 2026-08-20)
+## Tanda de mejoras (planificada el 2026-08-20, implementada el 2026-08-25)
 
-Tres planes escritos, ninguno implementado todavía. En orden de prioridad:
+| # | Qué | Estado |
+|---|---|---|
+| 1 | Que la web no invente "10 páginas" | ✅ hecho |
+| 2 | Avisar el límite de tamaño y subirlo a 95 MB | ✅ hecho |
+| 3 | Aceptar Word, Excel y PowerPoint, y convertirlos a PDF | ✅ hecho |
+| 4 | Pedidos con varios documentos | ⬅️ **lo único que falta** |
+| 5 | Contar páginas en el navegador | en pausa, a la espera de errores reales |
 
-| # | Qué | Plan | Tamaño |
-|---|---|---|---|
-| 1 | Que la web no invente "10 páginas" cuando no puede contarlas | [carga-de-archivos](docs/plan-carga-de-archivos.md) | chico |
-| 2 | Avisar el límite de tamaño y subirlo a 95 MB | [carga-de-archivos](docs/plan-carga-de-archivos.md) | chico |
-| 3 | Aceptar cualquier formato y convertirlo a PDF (LibreOffice) | [conversion-de-formatos](docs/plan-conversion-de-formatos.md) | grande |
-| 4 | Pedidos con varios documentos, cada uno con su configuración | [multiples-archivos](docs/plan-multiples-archivos.md) | el más grande |
-| 5 | Contar páginas en el navegador — solo si los errores reales lo justifican | [carga-de-archivos](docs/plan-carga-de-archivos.md) | mediano |
+Planes: [conversión de formatos](docs/plan-conversion-de-formatos.md) ·
+[carga de archivos](docs/plan-carga-de-archivos.md) ·
+[varios documentos](docs/plan-multiples-archivos.md)
 
-**El 1 es el único urgente:** hoy, en producción, si la web no logra contar las
-páginas asume que son 10 y le cobra al cliente sobre ese número.
+### Lo que cambió
 
-**Decisiones pendientes que bloquean trabajo:**
+**La web ya no inventa páginas.** Había un valor por defecto de 10 que se usaba
+cuando el conteo fallaba, y el precio se calculaba sobre ese número: un
+documento de 1 página podía cotizarse como 10. Ahora, si no se sabe cuántas
+páginas tiene, no se muestra precio y no se deja pagar.
 
-- **Tramos de precio con varios documentos: ¿por documento o sumando?** Tres
-  documentos de 10 páginas dan $6.000 o $4.500 según cómo se resuelva — 25% de
-  diferencia. Bloquea el motor de precios del punto 4.
-- ¿El cliente ve el PDF convertido antes de pagar? (define si hace falta
-  reestructurar la subida en el punto 3)
-- ¿Qué pasa si la conversión falla: se rechaza o entra como pedido a cotizar?
+**El límite pasó de 50 a 95 MB**, y se valida en el navegador antes de subir
+nada. 95 y no 100 porque el techo de Cloudflare en plan gratuito son 100 MB, y
+conviene que salte nuestro mensaje y no el suyo.
+
+**Se aceptan Word, Excel, PowerPoint y OpenOffice**, convertidos con LibreOffice
+(`document_convert.py`). Incluye `.pps`, que apareció porque lo trajo un
+cliente real y no figuraba en el plan.
+
+### Decisiones tomadas
+
+- **Los tramos de precio se calculan sobre el TOTAL del pedido**, sumando todos
+  los documentos. Si la suma alcanza el tramo, se aplica el descuento. Con esto
+  el punto 4 queda desbloqueado.
+- **Si la conversión falla, se rechaza el pedido** con un mensaje pidiendo un
+  PDF. Reversible: agregar después el camino de "cotizar en el mostrador" no
+  rompe nada.
+- **La vista previa del PDF convertido queda para más adelante.** Mientras
+  tanto, la web avisa que el diseño puede moverse y sugiere subir un PDF si se
+  necesita exactitud.
+
+### Sigue pendiente de decidir (solo afecta al punto 4)
+
 - ¿Qué estado toma un pedido de varios documentos si uno imprime y otro no?
 
-LibreOffice ya está descargado en la notebook, sin instalar.
+### Entorno de la notebook
+
+LibreOffice instalado y verificado con `.ppt` y `.pps` reales. Si no quedara en
+la ruta por defecto, se configura con `PRINTNET_SOFFICE` en el `.env`.
+
+**Ojo con los dos `.env`:** hay uno en `backend-printnet\` (lo usa Python
+suelto, que es como se trabaja) y otro en `dist\` (lo usa el `.exe`). Manda el
+de la carpeta desde donde se arranca.
