@@ -40,8 +40,13 @@ def confirmar_pago(conn: sqlite3.Connection, order_id: int) -> str:
         printer = conn.execute(
             "SELECT id, nombre FROM printers WHERE estado = 'activa' ORDER BY id LIMIT 1"
         ).fetchone()
+        # Se imprime el PDF, no el original: si el cliente subió un PowerPoint,
+        # pdf_path apunta al convertido. En archivos que ya venían en PDF las
+        # dos rutas coinciden; el COALESCE cubre las filas viejas, anteriores a
+        # que existiera la columna.
         archivo = conn.execute(
-            "SELECT id, stored_path FROM files WHERE order_id = ? ORDER BY id LIMIT 1",
+            "SELECT id, COALESCE(pdf_path, stored_path) AS stored_path"
+            " FROM files WHERE order_id = ? ORDER BY id LIMIT 1",
             (order_id,),
         ).fetchone()
         if printer and archivo:

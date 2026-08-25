@@ -64,6 +64,72 @@ filas = base_nueva("OTRA IMPRESORA X1")
 check("PRINTNET_IMPRESORA manda sobre el default",
       filas[0][0], "OTRA IMPRESORA X1")
 
+print("\n== Migraciones ==")
+
+import sqlite3  # noqa: E402
+import tempfile  # noqa: E402
+
+carpeta = tempfile.mkdtemp()
+os.environ["PRINTNET_DB"] = os.path.join(carpeta, "nueva.db")
+os.environ.pop("PRINTNET_IMPRESORA", None)
+import database  # noqa: E402
+importlib.reload(database)
+database.init_db()
+
+conn = sqlite3.connect(os.environ["PRINTNET_DB"])
+version = conn.execute("PRAGMA user_version").fetchone()[0]
+columnas = [c[1] for c in conn.execute("PRAGMA table_info(files)")]
+conn.close()
+
+check("una base nueva queda marcada en la última versión",
+      version, database.MIGRACIONES[-1][0])
+check("la tabla de archivos tiene la columna del PDF convertido",
+      "pdf_path" in columnas, True)
+
+# Volver a arrancar sobre la misma base no debe romper: es lo que pasa cada vez
+# que se reinicia el backend.
+database.init_db()
+check("arrancar dos veces sobre la misma base no falla", True, True)
+
+print("\n== Migrar una base vieja (el caso de la notebook) ==")
+# La notebook tiene una base creada antes de que existiera pdf_path. Al
+# actualizar, la migración tiene que agregar la columna sin perder los pedidos.
+
+vieja = os.path.join(tempfile.mkdtemp(), "vieja.db")
+conn = sqlite3.connect(vieja)
+conn.executescript("""
+CREATE TABLE files (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id          INTEGER NOT NULL,
+    filename_original TEXT NOT NULL,
+    stored_path       TEXT NOT NULL,
+    content_type      TEXT,
+    size_bytes        INTEGER,
+    paginas           INTEGER,
+    created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+INSERT INTO files (order_id, filename_original, stored_path, paginas)
+    VALUES (1, 'apunte.pdf', 'C:/uploads/apunte.pdf', 12);
+PRAGMA user_version = 1;
+""")
+conn.commit()
+conn.close()
+
+os.environ["PRINTNET_DB"] = vieja
+importlib.reload(database)
+database.init_db()
+
+conn = sqlite3.connect(vieja)
+columnas = [c[1] for c in conn.execute("PRAGMA table_info(files)")]
+fila = conn.execute("SELECT stored_path, pdf_path, paginas FROM files").fetchone()
+version = conn.execute("PRAGMA user_version").fetchone()[0]
+conn.close()
+
+check("se agrega la columna nueva", "pdf_path" in columnas, True)
+check("no se pierde el archivo que ya estaba", fila[2], 12)
+check("a los archivos viejos, el PDF es el mismo original", fila[1], fila[0])
+check("y la base queda en la última versión", version, database.MIGRACIONES[-1][0])
+
 print("\n== Ya no quedan impresoras de mentira ==")
 
 filas = base_nueva()

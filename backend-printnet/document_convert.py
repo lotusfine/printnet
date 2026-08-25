@@ -45,6 +45,12 @@ class ConversionResult:
     ok: bool
     pdf_path: str | None
     detalle: str
+    # ¿El cliente puede hacer algo al respecto? True si el problema es su
+    # documento (formato raro, archivo dañado); False si el problema es
+    # nuestro (LibreOffice caído, timeout). De eso depende qué mensaje se le
+    # muestra: los detalles técnicos van al registro, no a la pantalla de
+    # alguien que solo quiere sacar fotocopias.
+    del_documento: bool = False
 
 
 def necesita_conversion(nombre: str) -> bool:
@@ -107,7 +113,8 @@ def convertir_a_pdf(origen: str, carpeta_salida: str, soffice_path: str | None =
     if not necesita_conversion(origen):
         return _error(
             f"No sabemos convertir archivos {extension}. "
-            f"Formatos aceptados: PDF, Word, Excel, PowerPoint y OpenOffice."
+            f"Formatos aceptados: PDF, Word, Excel, PowerPoint y OpenOffice.",
+            del_documento=True,
         )
 
     if not os.path.isfile(origen):
@@ -135,9 +142,12 @@ def convertir_a_pdf(origen: str, carpeta_salida: str, soffice_path: str | None =
                           f"({type(e).__name__}: {e})")
 
         if proc.returncode != 0:
+            # Un código de salida distinto de cero casi siempre significa que
+            # el documento está dañado o tiene algo que LibreOffice no digiere.
             return _error(
                 f"LibreOffice terminó con código {proc.returncode} al convertir "
-                f"'{Path(origen).name}': {proc.stderr}"
+                f"'{Path(origen).name}': {proc.stderr}",
+                del_documento=True,
             )
 
         if not _esperar_archivo(destino, espera_salida_seg):
@@ -151,6 +161,7 @@ def convertir_a_pdf(origen: str, carpeta_salida: str, soffice_path: str | None =
     return ConversionResult(ok=True, pdf_path=str(destino), detalle=detalle)
 
 
-def _error(detalle: str) -> ConversionResult:
+def _error(detalle: str, del_documento: bool = False) -> ConversionResult:
     logger.error(detalle)
-    return ConversionResult(ok=False, pdf_path=None, detalle=detalle)
+    return ConversionResult(ok=False, pdf_path=None, detalle=detalle,
+                            del_documento=del_documento)

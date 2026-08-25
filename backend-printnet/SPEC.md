@@ -339,6 +339,46 @@ MercadoPago, y una excepción haría que MP reintentara el pago.
 Tests: `test_dispatch.py` (sin Windows ni impresora — inyecta un ejecutor
 falso, verifica el comando armado y mide el PDF que recibiría SumatraPDF).
 
+## document_convert
+
+`convertir_a_pdf(origen, carpeta_salida) → ConversionResult(ok, pdf_path, detalle, del_documento)`.
+
+Convierte Word, Excel, PowerPoint y OpenOffice a PDF con LibreOffice en modo
+silencioso. Un PDF pasa derecho, sin ejecutar nada.
+
+Env: `PRINTNET_SOFFICE` (default `C:\Program Files\LibreOffice\program\soffice.exe`).
+Sin LibreOffice instalado, los pedidos en PDF siguen funcionando y el resto se
+rechaza con un mensaje pidiendo un PDF.
+
+Formatos: `.doc .docx .odt .rtf .txt .xls .xlsx .ods .csv .ppt .pptx .pps .ppsx .odp`.
+**`.pps` está porque lo trajo un cliente real** — no figuraba en el plan.
+
+Comando:
+
+```
+soffice.exe -env:UserInstallation=file:///<perfil>
+            --headless --norestore --convert-to pdf --outdir <salida> <archivo>
+```
+
+**El perfil propio por conversión no es opcional:** LibreOffice no admite dos
+instancias compartiendo la configuración del usuario, así que sin eso dos
+pedidos simultáneos se pisan.
+
+**`soffice.exe` no espera a terminar.** Es un lanzador: arranca el proceso real
+y devuelve el control en milésimas de segundo (medido en la notebook). Cuando
+`subprocess.run` vuelve, el PDF puede no existir todavía — por eso se espera al
+archivo (hasta 15 s) antes de dar la conversión por fallada. Sin eso, en
+producción habríamos dado por fallada **cada** conversión.
+
+`del_documento` distingue quién puede arreglar el problema: `True` si es el
+documento del cliente (formato raro, archivo dañado) y el mensaje se le muestra
+tal cual; `False` si el problema es nuestro (LibreOffice caído, timeout), y
+entonces el detalle va al registro y el cliente ve un mensaje genérico — el
+detalle incluye rutas internas del servidor.
+
+Tests: `test_document_convert.py` (sin LibreOffice: ejecutor inyectable).
+Prueba manual contra LibreOffice real: `prueba_conversion.py`.
+
 ## pdf_normalize
 
 `normalizar_pdf(origen, destino, tamano) → ResultadoNormalizacion(paginas, convertidas)`.

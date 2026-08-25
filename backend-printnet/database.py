@@ -80,10 +80,14 @@ CREATE TABLE IF NOT EXISTS files (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     order_id          INTEGER NOT NULL REFERENCES orders(id),
     filename_original TEXT NOT NULL,
+    -- El archivo tal cual lo subió el cliente (puede no ser PDF)
     stored_path       TEXT NOT NULL,
+    -- El PDF que se imprime. Igual a stored_path si ya venía en PDF;
+    -- si no, el resultado de convertirlo con LibreOffice.
+    pdf_path          TEXT,
     content_type      TEXT,
     size_bytes        INTEGER,
-    -- páginas contadas con pypdf; NULL si no es PDF o no se pudo leer
+    -- páginas contadas con pypdf sobre el PDF; NULL si no se pudo leer
     paginas           INTEGER,
     created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -157,8 +161,20 @@ CREATE INDEX IF NOT EXISTS idx_orders_estado ON orders(estado);
 PRAGMA foreign_keys = ON;
 """
 
+# Los clientes pueden subir Word, Excel o PowerPoint, que se convierten a PDF
+# antes de imprimir. Hay que guardar los dos archivos: el original es lo que
+# subió el cliente (y lo que hay que mostrarle si reclama), y el PDF es lo que
+# efectivamente sale por la impresora.
+#
+# En un archivo que ya venía en PDF, las dos rutas son la misma.
+_MIGRACION_2 = """
+ALTER TABLE files ADD COLUMN pdf_path TEXT;
+UPDATE files SET pdf_path = stored_path WHERE pdf_path IS NULL;
+"""
+
 MIGRACIONES: list[tuple[int, str]] = [
     (1, _MIGRACION_1),
+    (2, _MIGRACION_2),
 ]
 
 # La impresora del local. El nombre tiene que ser EXACTAMENTE el que le da
@@ -205,13 +221,26 @@ def init_db() -> None:
     try:
         # WAL: lecturas concurrentes con la escritura; ideal para SQLite en la Pi
         conn.execute("PRAGMA journal_mode = WAL")
+
+        # ¿Base nueva? SCHEMA ya crea las tablas con su forma FINAL, así que no
+        # hay nada que migrar: se la marca al día. Sin esto, las migraciones
+        # correrían sobre un esquema que ya las incluye — por ejemplo,
+        # agregando una columna que la tabla recién creada ya tiene.
+        es_nueva = conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='files'"
+        ).fetchone()[0] == 0
+
         conn.executescript(SCHEMA)
 
-        version = conn.execute("PRAGMA user_version").fetchone()[0]
-        for nueva_version, sql in MIGRACIONES:
-            if nueva_version > version:
-                conn.executescript(sql)
-                conn.execute(f"PRAGMA user_version = {nueva_version}")
+        ultima_version = MIGRACIONES[-1][0] if MIGRACIONES else 0
+        if es_nueva:
+            conn.execute(f"PRAGMA user_version = {ultima_version}")
+        else:
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+            for nueva_version, sql in MIGRACIONES:
+                if nueva_version > version:
+                    conn.executescript(sql)
+                    conn.execute(f"PRAGMA user_version = {nueva_version}")
 
         if conn.execute("SELECT COUNT(*) FROM printers").fetchone()[0] == 0:
             conn.executemany(

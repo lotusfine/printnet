@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import sqlite3
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from fastapi import (
 )
 from pydantic import TypeAdapter, ValidationError
 
+import document_convert
 import notifications
 import payments
 import pricing
@@ -40,6 +42,27 @@ MAX_FILE_MB = 95
 MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024
 
 IMAGEN_CT = re.compile(r"^image/")
+
+_MENSAJE_FORMATO = (
+    "No aceptamos ese formato. Podés subir un PDF, o un documento de Word, "
+    "Excel, PowerPoint u OpenOffice — esos los convertimos a PDF nosotros."
+)
+
+# Cuando la conversión falla por un problema NUESTRO (LibreOffice caído, un
+# timeout), el cliente no puede hacer nada con el detalle técnico — y ese
+# detalle incluye rutas internas del servidor. Va al registro, no a la pantalla.
+_MENSAJE_CONVERSION_FALLIDA = (
+    "No pudimos procesar tu documento. Probá subiéndolo en PDF, o escribinos "
+    "y lo resolvemos."
+)
+
+
+def _fallo_conversion(resultado) -> HTTPException:
+    """Traduce un fallo de conversión a lo que corresponde mostrarle al cliente."""
+    if resultado.del_documento:
+        return HTTPException(422, resultado.detalle)
+    logger.error("Conversión fallida (problema del sistema): %s", resultado.detalle)
+    return HTTPException(422, _MENSAJE_CONVERSION_FALLIDA)
 
 
 def _nombre_seguro(nombre: str) -> str:
@@ -87,13 +110,21 @@ def _guardar_archivos(token: str, files: list[UploadFile]) -> list[dict]:
             raise HTTPException(413, f"'{nombre}' supera el máximo de {MAX_FILE_MB} MB")
         path.write_bytes(data)
 
+        # Lo que se imprime es siempre un PDF. Si el cliente subió un Word o un
+        # PowerPoint, se convierte acá; el original se conserva igual, porque es
+        # lo que él mandó y lo que hay que poder mostrarle si reclama.
+        resultado = document_convert.convertir_a_pdf(str(path), str(destino))
+        if not resultado.ok:
+            raise _fallo_conversion(resultado)
+
         guardados.append(
             {
                 "filename_original": f.filename or nombre,
                 "stored_path": str(path),
+                "pdf_path": resultado.pdf_path,
                 "content_type": f.content_type,
                 "size_bytes": len(data),
-                "paginas": _contar_paginas_pdf(path) if _es_pdf(f) else None,
+                "paginas": _contar_paginas_pdf(Path(resultado.pdf_path)),
             }
         )
     return guardados
@@ -125,22 +156,29 @@ def contar_paginas(file: UploadFile = File(...)):
     muestra ANTES de comprar se calcule con las páginas reales (misma base
     que el precio final del pedido).
     """
-    if not _es_pdf(file):
-        raise HTTPException(422, "el archivo debe ser un PDF")
-    import io
+    nombre = file.filename or "archivo"
+    if not (_es_pdf(file) or document_convert.necesita_conversion(nombre)):
+        raise HTTPException(422, _MENSAJE_FORMATO)
 
-    try:
-        from pypdf import PdfReader
+    data = file.file.read(MAX_FILE_BYTES + 1)
+    if len(data) > MAX_FILE_BYTES:
+        raise HTTPException(413, f"el archivo supera el máximo de {MAX_FILE_MB} MB")
 
-        data = file.file.read(MAX_FILE_BYTES + 1)
-        if len(data) > MAX_FILE_BYTES:
-            raise HTTPException(413, f"el archivo supera el máximo de {MAX_FILE_MB} MB")
-        paginas = len(PdfReader(io.BytesIO(data)).pages)
-    except HTTPException:
-        raise
-    except Exception:
-        raise HTTPException(422, "no se pudo leer el PDF para contar sus páginas")
-    return {"paginas": paginas}
+    # Se trabaja sobre una copia temporal: este endpoint no crea pedido, así
+    # que no debe dejar nada en uploads/.
+    with tempfile.TemporaryDirectory(prefix="printnet-conteo-") as tmp:
+        origen = Path(tmp) / _nombre_seguro(nombre)
+        origen.write_bytes(data)
+
+        resultado = document_convert.convertir_a_pdf(str(origen), tmp)
+        if not resultado.ok:
+            raise _fallo_conversion(resultado)
+
+        paginas = _contar_paginas_pdf(Path(resultado.pdf_path))
+
+    if paginas is None:
+        raise HTTPException(422, "no se pudo leer el documento para contar sus páginas")
+    return {"paginas": paginas, "convertido": not _es_pdf(file)}
 
 
 @router.post("/orders", status_code=201)
@@ -165,9 +203,10 @@ def crear_pedido(
     # 2) Validar archivos según el tipo de pedido
     if isinstance(pedido, PedidoFotocopias):
         if len(files) != 1:
-            raise HTTPException(422, "un pedido de fotocopias lleva exactamente 1 archivo PDF")
-        if not _es_pdf(files[0]):
-            raise HTTPException(422, "el archivo debe ser un PDF")
+            raise HTTPException(422, "un pedido de fotocopias lleva exactamente 1 documento")
+        nombre0 = files[0].filename or "archivo"
+        if not (_es_pdf(files[0]) or document_convert.necesita_conversion(nombre0)):
+            raise HTTPException(422, _MENSAJE_FORMATO)
     else:  # PedidoFotos
         if not files:
             raise HTTPException(422, "un pedido de fotos lleva al menos 1 archivo")
@@ -231,9 +270,10 @@ def crear_pedido(
     for a in archivos:
         db.execute(
             """INSERT INTO files (order_id, filename_original, stored_path,
-                                  content_type, size_bytes, paginas)
-               VALUES (?, ?, ?, ?, ?, ?)""",
+                                  pdf_path, content_type, size_bytes, paginas)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (order_id, a["filename_original"], a["stored_path"],
+             a.get("pdf_path") or a["stored_path"],
              a["content_type"], a["size_bytes"], a["paginas"]),
         )
 
