@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react';
 import { contarPaginas } from '../../api';
 import { MAX_ARCHIVO_BYTES, MAX_ARCHIVO_MB, formatearTamano } from '../../limites';
+import { ACCEPT, describirExtension, esAceptado, esConvertible } from '../../formatos';
 
 // NO HAY VALOR POR DEFECTO PARA LAS PÁGINAS, A PROPÓSITO.
 //
@@ -52,11 +53,27 @@ const FileUpload = ({ onFileChange, pageRange, onPageRangeChange, rangeError }) 
   // 'vacio' | 'contando' | 'listo' | 'error'
   const [estado, setEstado] = useState('vacio');
   const [paginas, setPaginas] = useState(null);
+  const [convertido, setConvertido] = useState(false);
   const [error, setError] = useState(null);
 
   const handleFile = async (f) => {
-    if (!f || f.type !== 'application/pdf') return;
+    if (!f) return;
     setFile(f);
+
+    // Antes se ignoraba en silencio cualquier archivo que no fuera PDF: el
+    // cliente lo elegía y no pasaba nada, sin saber por qué.
+    if (!esAceptado(f.name)) {
+      setEstado('error');
+      setPaginas(null);
+      setError({
+        mensaje: `No aceptamos archivos ${describirExtension(f.name)}.`,
+        detalle: '',
+        reintentable: false,
+        sugerencia: 'Podés subir un PDF, o un documento de Word, Excel o PowerPoint.',
+      });
+      onFileChange(null);
+      return;
+    }
 
     // El tamaño se valida ANTES de subir nada: el navegador ya lo sabe. Antes
     // el cliente esperaba toda la subida para enterarse recién al pagar.
@@ -79,8 +96,9 @@ const FileUpload = ({ onFileChange, pageRange, onPageRangeChange, rangeError }) 
     onFileChange(null);
 
     try {
-      const { paginas: reales } = await contarPaginas(f);
+      const { paginas: reales, convertido: fueConvertido } = await contarPaginas(f);
       setPaginas(reales);
+      setConvertido(Boolean(fueConvertido));
       setEstado('listo');
       onFileChange({ name: f.name, pages: reales, file: f });
     } catch (e) {
@@ -119,17 +137,19 @@ const FileUpload = ({ onFileChange, pageRange, onPageRangeChange, rangeError }) 
           <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
         </svg>
         <p className="text-sm font-bold text-stone-600">
-          {dragging ? 'Soltá el archivo acá' : 'Arrastrá un PDF o hacé click para elegir'}
+          {dragging ? 'Soltá el archivo acá' : 'Arrastrá tu documento o hacé click para elegir'}
         </p>
-        <p className="text-xs text-stone-400">
-          Solo archivos .pdf · hasta {MAX_ARCHIVO_MB} MB
+        <p className="text-xs text-stone-500 text-center max-w-xs">
+          Subí tu PDF, o cualquier documento de Word, Excel o PowerPoint —
+          lo convertimos a PDF automáticamente.
         </p>
+        <p className="text-xs text-stone-400">Hasta {MAX_ARCHIVO_MB} MB</p>
       </div>
 
       <input
         ref={inputRef}
         type="file"
-        accept="application/pdf"
+        accept={ACCEPT}
         className="hidden"
         onChange={(e) => handleFile(e.target.files[0])}
       />
@@ -143,10 +163,25 @@ const FileUpload = ({ onFileChange, pageRange, onPageRangeChange, rangeError }) 
             <p className="text-sm font-bold text-stone-700 truncate">{file.name}</p>
             <p className="text-xs text-stone-400">
               {estado === 'contando'
-                ? 'Leyendo tu documento…'
+                ? (esConvertible(file.name) ? 'Convirtiendo a PDF…' : 'Leyendo tu documento…')
                 : `${paginas} ${paginas === 1 ? 'página' : 'páginas'}`}
             </p>
           </div>
+        </div>
+      )}
+
+      {/* Solo si hubo conversión. LibreOffice es bueno pero no perfecto: un
+          PowerPoint con tipografías raras puede salir con el texto corrido, y
+          es mejor que el cliente lo sepa antes de pagar que cuando retira. */}
+      {estado === 'listo' && convertido && (
+        <div className="mt-3 flex items-start gap-2 bg-amber-100/60 border border-amber-300 rounded-lg px-3 py-2">
+          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="currentColor">
+            <path fillRule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zM12.75 6a.75.75 0 00-1.5 0v6c0 .414.336.75.75.75h4.5a.75.75 0 000-1.5h-3.75V6z" clipRule="evenodd"/>
+          </svg>
+          <p className="text-[11px] leading-relaxed text-amber-800">
+            Convertimos tu documento a PDF. El diseño puede moverse un poco
+            respecto del original — si necesitás que salga exacto, subilo en PDF.
+          </p>
         </div>
       )}
 
@@ -159,9 +194,11 @@ const FileUpload = ({ onFileChange, pageRange, onPageRangeChange, rangeError }) 
             <div className="min-w-0 flex-1">
               <p className="text-sm font-bold text-red-700">{error.mensaje}</p>
               <p className="mt-1 text-xs text-red-600/80">
-                {error.reintentable
-                  ? 'No podemos calcular el precio sin saber cuántas páginas tiene.'
-                  : 'Probá con un archivo más liviano, o dividilo en partes.'}
+                {error.sugerencia
+                  ? error.sugerencia
+                  : error.reintentable
+                    ? 'No podemos calcular el precio sin saber cuántas páginas tiene.'
+                    : 'Probá con un archivo más liviano, o dividilo en partes.'}
               </p>
               {error.detalle && (
                 <p className="mt-1 text-[10px] text-red-400 break-words">
