@@ -42,9 +42,10 @@ CONTACTO_PRUEBA = {
 def main() -> int:
     p = argparse.ArgumentParser(description="Crea un pedido de prueba de punta a punta.")
     p.add_argument("--url", default="http://localhost:8000", help="Backend")
-    p.add_argument("--archivo", "--pdf", dest="archivo",
+    p.add_argument("--archivo", "--pdf", dest="archivos", action="append",
                    help="Documento a subir: PDF, Word, Excel o PowerPoint. "
-                        "Si no se pasa, se genera un PDF de prueba.")
+                        "Se puede repetir para mandar varios en un mismo "
+                        "pedido. Si no se pasa, se genera un PDF de prueba.")
     p.add_argument("--paginas", type=int, default=4, help="Páginas del PDF generado")
     p.add_argument("--pdf-tamano", choices=["A4", "A3"], default="A4",
                    help="Tamaño de página del PDF generado (distinto del pedido)")
@@ -66,18 +67,16 @@ def main() -> int:
     if args.nombre:
         contacto["nombre"] = args.nombre
 
-    if args.archivo:
-        ruta = args.archivo
+    if args.archivos:
+        rutas = args.archivos
     else:
         f = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
         f.write(generar(args.paginas, args.pdf_tamano))
         f.close()
-        ruta = f.name
-        print(f"PDF generado: {args.paginas} páginas {args.pdf_tamano} → {ruta}")
+        rutas = [f.name]
+        print(f"PDF generado: {args.paginas} páginas {args.pdf_tamano} → {f.name}")
 
-    datos = {
-        "tipo": "fotocopias",
-        "contacto": contacto,
+    documento = {
         "opciones": {
             "color": args.color,
             "caras": args.caras,
@@ -88,9 +87,20 @@ def main() -> int:
                   else {"modo": "todas", "valor": ""}),
         "terminaciones": [],
     }
+    # Con un solo documento se manda la forma VIEJA a propósito: es la que usa
+    # la web hoy, y así esta prueba también verifica que siga funcionando.
+    if len(rutas) == 1:
+        datos = {"tipo": "fotocopias", "contacto": contacto, **documento}
+    else:
+        datos = {"tipo": "fotocopias", "contacto": contacto,
+                 "documentos": [dict(documento) for _ in rutas]}
 
-    print(f"\nPedido: {args.color}, {args.caras} faz, {args.copias} copia(s), "
-          f"{args.tamano}, {args.rango or 'todas las páginas'}")
+    print(f"\nPedido: {len(rutas)} documento(s) · {args.color}, {args.caras} faz, "
+          f"{args.copias} copia(s), {args.tamano}, "
+          f"{args.rango or 'todas las páginas'}")
+    print(f"Contrato: forma {'vieja (1 documento)' if len(rutas) == 1 else 'nueva (varios)'}")
+    for r in rutas:
+        print(f"  · {os.path.basename(r)}")
     print(f"Cliente: {contacto['nombre']} <{contacto['email']}>")
     if not args.email:
         print("  (dirección inventada: no va a llegar ningún mail. "
@@ -100,14 +110,19 @@ def main() -> int:
     try:
         # El nombre real importa: el backend decide por la extensión si hay
         # que convertir el documento antes de imprimirlo.
-        with open(ruta, "rb") as fh:
+        abiertos = [open(r, "rb") for r in rutas]
+        try:
             r = requests.post(
                 f"{args.url}/orders",
                 data={"datos": json.dumps(datos)},
                 files=[("files", (os.path.basename(ruta), fh,
-                                  "application/octet-stream"))],
-                timeout=120,
+                                  "application/octet-stream"))
+                       for ruta, fh in zip(rutas, abiertos)],
+                timeout=180,
             )
+        finally:
+            for fh in abiertos:
+                fh.close()
     except requests.exceptions.ConnectionError:
         print(f"\nNo hay nadie escuchando en {args.url}.")
         print("¿Levantaste el backend?  .venv\\Scripts\\python run_server.py")
