@@ -35,6 +35,10 @@ def confirmar_pago(conn: sqlite3.Connection, order_id: int) -> str:
     opciones = json.loads(order["opciones"])
     estado = "pendiente"
     printer_id = None
+    # Un despacho que falla después del pago no se puede "cancelar": el papel
+    # de los documentos que sí salieron ya se gastó. Lo único razonable es que
+    # el operador se entere antes de entregar el pedido.
+    atencion_manual = False
 
     if order["tipo"] == "fotocopias":
         printer = conn.execute(
@@ -79,8 +83,10 @@ def confirmar_pago(conn: sqlite3.Connection, order_id: int) -> str:
                 estado = "imprimiendo"
                 printer_id = printer["id"]
             if despachados < len(archivos):
+                atencion_manual = True
                 logger.error(
-                    "Pedido %s: se despacharon %d de %d documentos",
+                    "Pedido %s: se despacharon %d de %d documentos — queda "
+                    "marcado para revisión del operador",
                     order_id, despachados, len(archivos),
                 )
         else:
@@ -90,7 +96,8 @@ def confirmar_pago(conn: sqlite3.Connection, order_id: int) -> str:
 
     conn.execute(
         "UPDATE orders SET pagado = 1, estado = ?, printer_id = ?,"
+        " requiere_manual = requiere_manual OR ?,"
         " updated_at = datetime('now') WHERE id = ?",
-        (estado, printer_id, order_id),
+        (estado, printer_id, int(atencion_manual), order_id),
     )
     return estado

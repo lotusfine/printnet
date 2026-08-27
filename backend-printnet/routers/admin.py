@@ -53,6 +53,21 @@ def _shape_admin(db: sqlite3.Connection, order: sqlite3.Row) -> dict:
     ]
     terminaciones = opciones.get("terminaciones") or []
 
+    # Documentos que NO llegaron a la impresora. Sin esto, "requiere atención"
+    # le dice al operador que mire pero no qué mirar, y con varios documentos
+    # eso no alcanza: tiene que saber cuál reimprimir antes de entregar.
+    fallados = [
+        r["filename_original"]
+        for r in db.execute(
+            """SELECT f.filename_original
+                 FROM dispatch_log d JOIN files f ON f.id = d.file_id
+                WHERE d.order_id = ? AND d.ok = 0
+                  AND NOT EXISTS (SELECT 1 FROM dispatch_log d2
+                                   WHERE d2.file_id = d.file_id AND d2.ok = 1)""",
+            (order["id"],),
+        )
+    ]
+
     base = {
         "id": order["id"],
         "token": order["token"],
@@ -64,6 +79,7 @@ def _shape_admin(db: sqlite3.Connection, order: sqlite3.Row) -> dict:
         "estado": order["estado"],
         "pagado": bool(order["pagado"]),
         "requiere_manual": bool(order["requiere_manual"]),
+        "documentos_fallados": fallados,
         "hace": _minutos_desde(order["created_at"]),
         "acabado": " · ".join(terminaciones) if terminaciones else None,
         "contacto": {"tel": order["telefono"], "email": order["email"]},
