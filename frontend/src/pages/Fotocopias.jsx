@@ -1,73 +1,128 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import ContactForm, { validateContacto, composeTelefono, DEFAULT_CONTACTO } from '../components/ContactForm';
-import FileUpload, { validateRango } from '../components/fotocopias/FileUpload';
+import FileUpload from '../components/fotocopias/FileUpload';
 import PrintOptions from '../components/fotocopias/PrintOptions';
 import OrderSummary from '../components/fotocopias/OrderSummary';
 import { crearPedido } from '../api';
 import { PEDIDOS_HABILITADOS } from '../config';
+import { paginasDelRango } from '../precio';
 import PedidosDeshabilitados from '../components/PedidosDeshabilitados';
 
-const DEFAULT_OPTIONS = {
-  color: 'byn',
-  caras: 'simple',
-  copias: 1,
-  tamano: 'A4',
-  anillado: false,
+// La configuración NO tiene valores por defecto, a propósito.
+//
+// Si los tuviera, un cliente distraído podría pagar un pedido configurado por
+// nosotros sin haberlo mirado. Cada documento arranca sin configurar y la
+// pantalla lo muestra atenuado hasta que el cliente decide.
+const OPCIONES_VACIAS = { color: '', caras: '', copias: '', tamano: '' };
+const RANGO_POR_DEFECTO = { modo: 'todas', valor: '' };
+
+const configurado = (doc) =>
+  doc.opciones.color && doc.opciones.caras && doc.opciones.copias && doc.opciones.tamano;
+
+/** Documento listo para cotizar: páginas a imprimir según su rango. */
+const paraCotizar = (doc) => {
+  if (doc.estado !== 'listo' || !configurado(doc)) return null;
+  return {
+    paginas: paginasDelRango(doc.paginas, doc.rango),
+    opciones: { ...doc.opciones, copias: Number(doc.opciones.copias) },
+    terminaciones: [],
+  };
 };
 
-// Páginas que se van a imprimir según el rango (espejo de pricing.py).
-// Devuelve null si todavía no sabemos cuántas páginas tiene el documento —
-// null significa "no sé", y nunca hay que reemplazarlo por un número
-// inventado: de ahí salía el precio equivocado que llegaba al cliente.
-const paginasEfectivas = (totalPaginas, rango) => {
-  if (totalPaginas == null) return null;
-  if (rango.modo !== 'rango') return totalPaginas;
-  const v = rango.valor.trim();
-  if (!/^\d+(-\d+)?$/.test(v)) return totalPaginas;
-  const [inicio, fin = inicio] = v.split('-').map(Number);
-  if (inicio < 1 || inicio > fin) return totalPaginas;
-  return fin - inicio + 1;
-};
-
-const DEFAULT_RANGO = { modo: 'todas', valor: '' };
+let proximoId = 1;
 
 const Fotocopias = () => {
-  const [fileInfo, setFileInfo] = useState(null);
-  const [options, setOptions] = useState(DEFAULT_OPTIONS);
+  const [docs, setDocs] = useState([]);
+  const [seleccionado, setSeleccionado] = useState(null);
   const [contacto, setContacto] = useState(DEFAULT_CONTACTO);
-  const [rango, setRango] = useState(DEFAULT_RANGO);
   const [errors, setErrors] = useState({});
-  // idle | enviando | exito | error
+  // idle | enviando | redirigiendo | exito | error
   const [envio, setEnvio] = useState({ estado: 'idle' });
 
-  const handleContactoChange = (nuevo) => {
-    setContacto(nuevo);
-    setErrors({});
-    setEnvio({ estado: 'idle' });
+  const limpiarEnvio = () => setEnvio({ estado: 'idle' });
+
+  const actualizarDoc = (id, cambios) => {
+    setDocs((prev) => prev.map((d) => (d.id === id ? { ...d, ...cambios } : d)));
+    limpiarEnvio();
   };
 
-  const handleRangoChange = (nuevo) => {
-    setRango(nuevo);
-    setErrors({});
-    setEnvio({ estado: 'idle' });
+  const agregarDocs = (archivos) => {
+    const nuevos = archivos.map((f) => ({
+      id: proximoId++,
+      file: f,
+      name: f.name,
+      paginas: null,
+      convertido: false,
+      estado: 'contando',
+      error: null,
+      opciones: { ...OPCIONES_VACIAS },
+      rango: { ...RANGO_POR_DEFECTO },
+    }));
+    setDocs((prev) => [...prev, ...nuevos]);
+    setSeleccionado((actual) => actual ?? nuevos[0]?.id ?? null);
+    limpiarEnvio();
+    return nuevos;
   };
+
+  const quitarDoc = (id) => {
+    setDocs((prev) => {
+      const restantes = prev.filter((d) => d.id !== id);
+      setSeleccionado((sel) => (sel === id ? restantes[0]?.id ?? null : sel));
+      return restantes;
+    });
+    limpiarEnvio();
+  };
+
+  const docSeleccionado = docs.find((d) => d.id === seleccionado) || null;
+
+  const aplicarATodos = (opciones) => {
+    setDocs((prev) => prev.map((d) =>
+      d.estado === 'error' ? d : { ...d, opciones: { ...opciones } }
+    ));
+    limpiarEnvio();
+  };
+
+  const cotizables = docs.map(paraCotizar);
+  const conError = docs.filter((d) => d.estado === 'error');
+  const sinConfigurar = docs.filter((d) => d.estado === 'listo' && !configurado(d));
+  const contando = docs.some((d) => d.estado === 'contando');
 
   const handlePay = async () => {
     if (envio.estado === 'enviando') return;
 
-    const errs = validateContacto(contacto);
-    if (rango.modo === 'rango') {
-      const rangoError = validateRango(rango.valor);
-      if (rangoError) errs.rango = rangoError;
+    if (!docs.length) {
+      setEnvio({ estado: 'error', mensaje: 'Subí al menos un documento.' });
+      return;
     }
+    if (conError.length) {
+      setEnvio({
+        estado: 'error',
+        mensaje: `Quitá ${conError.map((d) => `"${d.name}"`).join(', ')} para poder continuar.`,
+      });
+      return;
+    }
+    if (contando) return;
+    if (sinConfigurar.length) {
+      setSeleccionado(sinConfigurar[0].id);
+      setEnvio({
+        estado: 'error',
+        mensaje: `Falta configurar ${sinConfigurar.map((d) => `"${d.name}"`).join(', ')}.`,
+      });
+      return;
+    }
+
+    const errs = validateContacto(contacto);
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
 
     setEnvio({ estado: 'enviando' });
     try {
-      // anillado viaja como terminación, no como opción de impresión
-      const { anillado, ...opcionesImpresion } = options;
+      const documentos = docs.map((d) => ({
+        opciones: { ...d.opciones, copias: Number(d.opciones.copias) },
+        rango: d.rango,
+        terminaciones: [],
+      }));
       const pedido = await crearPedido(
         {
           tipo: 'fotocopias',
@@ -76,15 +131,11 @@ const Fotocopias = () => {
             telefono: composeTelefono(contacto),
             email: contacto.email.trim(),
           },
-          opciones: opcionesImpresion,
-          rango,
-          terminaciones: anillado ? ['Anillado'] : [],
+          documentos,
         },
-        [fileInfo.file]
+        docs.map((d) => d.file)
       );
       if (pedido.init_point) {
-        // Pago real: derivar al Checkout Pro de MercadoPago. Al terminar,
-        // MP devuelve al cliente a /estado/{token} (back_urls).
         setEnvio({ estado: 'redirigiendo' });
         window.location.href = pedido.init_point;
         return;
@@ -94,6 +145,8 @@ const Fotocopias = () => {
       setEnvio({ estado: 'error', mensaje: e.message });
     }
   };
+
+  if (!PEDIDOS_HABILITADOS) return <PedidosDeshabilitados servicio="fotocopias" />;
 
   return (
     <section className="flex flex-col space-y-8 md:space-y-12">
@@ -110,38 +163,39 @@ const Fotocopias = () => {
         <div className="text-center">
           <h1 className="text-4xl font-chalk md:text-6xl text-stone-800/90 mb-2">Fotocopias</h1>
           <p className="text-base italic font-chalk text-stone-500 md:text-lg">
-            Subí tu archivo y configurá tu pedido
+            Subí tus archivos y configurá tu pedido
           </p>
         </div>
       </header>
 
-      {!PEDIDOS_HABILITADOS && <PedidosDeshabilitados accent="amber" />}
-
-      <div className={`grid w-full gap-8 md:gap-10 md:grid-cols-2 ${PEDIDOS_HABILITADOS ? '' : 'hidden'}`}>
+      <div className="grid gap-6 md:gap-8 md:grid-cols-2">
         <FileUpload
-          onFileChange={(info) => { setFileInfo(info); setEnvio({ estado: 'idle' }); }}
-          pageRange={rango}
-          onPageRangeChange={handleRangoChange}
-          rangeError={errors.rango}
+          documentos={docs}
+          seleccionado={seleccionado}
+          onSeleccionar={(id) => { setSeleccionado(id); limpiarEnvio(); }}
+          onAgregar={agregarDocs}
+          onActualizar={actualizarDoc}
+          onQuitar={quitarDoc}
         />
         <ContactForm
           contacto={contacto}
           errors={errors}
-          onChange={handleContactoChange}
+          onChange={(nuevo) => { setContacto(nuevo); setErrors({}); limpiarEnvio(); }}
           accent="amber"
         />
         <PrintOptions
-          pages={paginasEfectivas(fileInfo?.pages ?? null, rango)}
-          options={options}
-          onChange={(o) => { setOptions(o); setEnvio({ estado: 'idle' }); }}
+          documento={docSeleccionado}
+          cantidadDocumentos={docs.length}
+          onChange={(opciones) => actualizarDoc(docSeleccionado.id, { opciones })}
+          onRangoChange={(rango) => actualizarDoc(docSeleccionado.id, { rango })}
+          onAplicarATodos={aplicarATodos}
         />
         <OrderSummary
-          fileInfo={fileInfo}
-          options={options}
-          pageRange={rango}
-          pagesACobrar={paginasEfectivas(fileInfo?.pages ?? null, rango)}
+          documentos={docs}
+          cotizables={cotizables}
           onPay={handlePay}
           enviando={envio.estado === 'enviando' || envio.estado === 'redirigiendo'}
+          bloqueado={!docs.length || !!conError.length || !!sinConfigurar.length || contando}
         />
       </div>
 
@@ -153,7 +207,7 @@ const Fotocopias = () => {
 
       {envio.estado === 'error' && (
         <p className="text-sm font-bold text-red-500 text-center max-w-xl mx-auto">
-          No pudimos crear el pedido: {envio.mensaje}
+          {envio.mensaje}
         </p>
       )}
 
@@ -174,21 +228,18 @@ const Fotocopias = () => {
               <dd className="text-sm font-bold text-stone-700 capitalize">{envio.pedido.estado}</dd>
             </div>
             <div className="flex justify-between gap-4 py-1.5 border-b border-green-100">
-              <dt className="text-xs font-bold uppercase tracking-widest text-stone-400">Páginas reales del PDF</dt>
-              <dd className="text-sm font-bold text-stone-700">{envio.pedido.paginas}</dd>
-            </div>
-            <div className="flex justify-between gap-4 py-1.5 border-b border-green-100">
-              <dt className="text-xs font-bold uppercase tracking-widest text-stone-400">Precio final</dt>
-              <dd className="text-lg font-black text-amber-700">${envio.pedido.precio_total?.toLocaleString('es-AR')}</dd>
+              <dt className="text-xs font-bold uppercase tracking-widest text-stone-400">Documentos</dt>
+              <dd className="text-sm font-bold text-stone-700">{docs.length}</dd>
             </div>
             <div className="flex justify-between gap-4 py-1.5">
-              <dt className="text-xs font-bold uppercase tracking-widest text-stone-400 shrink-0">Código de seguimiento</dt>
-              <dd className="text-xs font-mono font-bold text-stone-600 break-all text-right">{envio.pedido.token}</dd>
+              <dt className="text-xs font-bold uppercase tracking-widest text-stone-400">Seguimiento</dt>
+              <dd className="text-sm font-bold text-stone-700">
+                <Link to={`/estado/${envio.pedido.token}`} className="text-amber-700 underline">
+                  Ver estado
+                </Link>
+              </dd>
             </div>
           </dl>
-          <p className="mt-6 text-xs italic text-stone-400 text-center">
-            Te enviamos un email con el detalle. Guardá el código para consultar el estado.
-          </p>
         </article>
       )}
     </section>
