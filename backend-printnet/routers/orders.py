@@ -202,11 +202,18 @@ def crear_pedido(
 
     # 2) Validar archivos según el tipo de pedido
     if isinstance(pedido, PedidoFotocopias):
-        if len(files) != 1:
-            raise HTTPException(422, "un pedido de fotocopias lleva exactamente 1 documento")
-        nombre0 = files[0].filename or "archivo"
-        if not (_es_pdf(files[0]) or document_convert.necesita_conversion(nombre0)):
-            raise HTTPException(422, _MENSAJE_FORMATO)
+        # Un archivo por documento: cada uno trae su propia configuración y el
+        # emparejamiento es por posición.
+        if len(files) != len(pedido.documentos):
+            raise HTTPException(
+                422,
+                f"llegaron {len(files)} archivo(s) y {len(pedido.documentos)} "
+                f"configuración(es): tiene que haber una por documento",
+            )
+        for f in files:
+            nombre = f.filename or "archivo"
+            if not (_es_pdf(f) or document_convert.necesita_conversion(nombre)):
+                raise HTTPException(422, f"'{nombre}': {_MENSAJE_FORMATO}")
     else:  # PedidoFotos
         if not files:
             raise HTTPException(422, "un pedido de fotos lleva al menos 1 archivo")
@@ -220,30 +227,61 @@ def crear_pedido(
 
     # 4) Precio + triage según tipo
     if isinstance(pedido, PedidoFotocopias):
-        paginas_doc = archivos[0]["paginas"]
-        if paginas_doc is None:
-            raise HTTPException(422, "no se pudo leer el PDF para contar sus páginas")
-        try:
-            paginas_a_cobrar = pricing.paginas_del_rango(
-                pedido.rango.modo, pedido.rango.valor, paginas_doc
-            )
-        except ValueError as e:
-            raise HTTPException(422, str(e))
-        precio_total = pricing.calcular_precio_fotocopias(
-            paginas_a_cobrar,
-            pedido.opciones.copias,
-            pedido.opciones.color,
-            pedido.opciones.caras,
-            pedido.opciones.tamano,
-            pedido.terminaciones,
-        )
-        requiere_manual = bool(pedido.terminaciones)
+        cotizables = []
+        detalle_docs = []
+        for doc, archivo in zip(pedido.documentos, archivos):
+            paginas_doc = archivo["paginas"]
+            if paginas_doc is None:
+                raise HTTPException(
+                    422,
+                    f"no se pudo leer '{archivo['filename_original']}' para "
+                    f"contar sus páginas",
+                )
+            try:
+                paginas_a_cobrar = pricing.paginas_del_rango(
+                    doc.rango.modo, doc.rango.valor, paginas_doc
+                )
+            except ValueError as e:
+                raise HTTPException(422, f"'{archivo['filename_original']}': {e}")
+
+            cotizables.append(pricing.Documento(
+                paginas=paginas_a_cobrar,
+                copias=doc.opciones.copias,
+                color=doc.opciones.color,
+                caras=doc.opciones.caras,
+                tamano=doc.opciones.tamano,
+                terminaciones=list(doc.terminaciones),
+            ))
+            detalle_docs.append({
+                "archivo": archivo["filename_original"],
+                "opciones": doc.opciones.model_dump(),
+                "rango": doc.rango.model_dump(),
+                "terminaciones": doc.terminaciones,
+                "paginas_documento": paginas_doc,
+                "paginas_a_imprimir": paginas_a_cobrar,
+            })
+
+        # El tramo de descuento sale de la suma de todos los documentos.
+        cotizacion = pricing.calcular_precio_pedido(cotizables)
+        precio_total = cotizacion.total
+        requiere_manual = any(d.terminaciones for d in pedido.documentos)
+
+        for detalle, linea in zip(detalle_docs, cotizacion.documentos):
+            detalle["subtotal"] = linea.subtotal
+            detalle["precio_unitario"] = linea.unitario
+
+        primero = detalle_docs[0]
         opciones_json = {
-            "opciones": pedido.opciones.model_dump(),
-            "rango": pedido.rango.model_dump(),
-            "terminaciones": pedido.terminaciones,
-            "paginas_documento": paginas_doc,
-            "paginas_a_imprimir": paginas_a_cobrar,
+            "documentos": detalle_docs,
+            "cantidad_total": cotizacion.cantidad_total,
+            # Espejo de la forma vieja, con el primer documento. El panel de
+            # operador y la página de seguimiento todavía leen estas claves;
+            # se pueden sacar cuando dejen de usarlas.
+            "opciones": primero["opciones"],
+            "rango": primero["rango"],
+            "terminaciones": primero["terminaciones"],
+            "paginas_documento": primero["paginas_documento"],
+            "paginas_a_imprimir": primero["paginas_a_imprimir"],
         }
     else:
         precio_total = None  # los pedidos especiales se cotizan manualmente

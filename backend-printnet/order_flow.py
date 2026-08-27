@@ -44,26 +44,45 @@ def confirmar_pago(conn: sqlite3.Connection, order_id: int) -> str:
         # pdf_path apunta al convertido. En archivos que ya venían en PDF las
         # dos rutas coinciden; el COALESCE cubre las filas viejas, anteriores a
         # que existiera la columna.
-        archivo = conn.execute(
+        archivos = conn.execute(
             "SELECT id, COALESCE(pdf_path, stored_path) AS stored_path"
-            " FROM files WHERE order_id = ? ORDER BY id LIMIT 1",
+            " FROM files WHERE order_id = ? ORDER BY id",
             (order_id,),
-        ).fetchone()
-        if printer and archivo:
+        ).fetchall()
+
+        # Cada documento tiene su propia configuración de impresión. En pedidos
+        # viejos, opciones["documentos"] no existe y hay una sola configuración
+        # para todo el pedido: el fallback la reusa para el único archivo.
+        docs = opciones.get("documentos")
+
+        if printer and archivos:
             dispatcher = get_dispatcher()
-            resultado = dispatcher.dispatch(
-                printer["nombre"], archivo["stored_path"], opciones
-            )
-            conn.execute(
-                """INSERT INTO dispatch_log (order_id, printer_id, file_id,
-                                             dispatcher, ok, detalle)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (order_id, printer["id"], archivo["id"], dispatcher.nombre,
-                 int(resultado.ok), resultado.detalle),
-            )
-            if resultado.ok:
+            despachados = 0
+            for i, archivo in enumerate(archivos):
+                config = docs[i] if docs and i < len(docs) else opciones
+                resultado = dispatcher.dispatch(
+                    printer["nombre"], archivo["stored_path"], config
+                )
+                conn.execute(
+                    """INSERT INTO dispatch_log (order_id, printer_id, file_id,
+                                                 dispatcher, ok, detalle)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (order_id, printer["id"], archivo["id"], dispatcher.nombre,
+                     int(resultado.ok), resultado.detalle),
+                )
+                if resultado.ok:
+                    despachados += 1
+
+            # Basta con que uno haya entrado para que el pedido esté en curso.
+            # Los que fallaron quedan en dispatch_log y el operador los ve ahí.
+            if despachados:
                 estado = "imprimiendo"
                 printer_id = printer["id"]
+            if despachados < len(archivos):
+                logger.error(
+                    "Pedido %s: se despacharon %d de %d documentos",
+                    order_id, despachados, len(archivos),
+                )
         else:
             logger.warning(
                 "Pedido %s sin despachar: no hay impresoras activas", order_id

@@ -73,14 +73,61 @@ class Rango(BaseModel):
         return self
 
 
-class PedidoFotocopias(BaseModel):
-    tipo: Literal["fotocopias"]
-    contacto: Contacto
+class DocumentoFotocopias(BaseModel):
+    """Un documento del pedido, con su propia configuración de impresión."""
+
     opciones: OpcionesFotocopias
     rango: Rango = Field(default_factory=Rango)
     # La UI de /fotocopias todavía no ofrece terminaciones; el contrato ya
     # las acepta porque definen requiere_manual (decisión de arquitectura 2).
     terminaciones: list[TERMINACIONES] = Field(default_factory=list)
+
+
+# Tope de documentos por pedido. No es una regla de negocio: es para que un
+# pedido no encole 200 trabajos de impresión ni deje al backend convirtiendo
+# archivos durante minutos mientras el cliente espera en la pantalla.
+MAX_DOCUMENTOS = 20
+
+
+class PedidoFotocopias(BaseModel):
+    """Pedido de fotocopias con uno o varios documentos.
+
+    ACEPTA DOS FORMAS, a propósito:
+
+      1. La nueva:   {"documentos": [{"opciones": ..., "rango": ...}, ...]}
+      2. La vieja:   {"opciones": ..., "rango": ..., "terminaciones": [...]}
+
+    La vieja es la que manda la web hoy. Las dos piezas se despliegan por
+    separado —el backend por git en la notebook, la web subiendo archivos a
+    cPanel—, así que si el contrato solo aceptara la forma nueva habría una
+    ventana con los pedidos rotos. Internamente todo se normaliza a
+    `documentos`, así que el resto del sistema conoce una sola forma.
+    """
+
+    tipo: Literal["fotocopias"]
+    contacto: Contacto
+    documentos: list[DocumentoFotocopias] = Field(min_length=1, max_length=MAX_DOCUMENTOS)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _aceptar_forma_vieja(cls, datos):
+        if not isinstance(datos, dict):
+            return datos
+        tiene_viejo = "opciones" in datos
+        tiene_nuevo = "documentos" in datos
+
+        if tiene_viejo and tiene_nuevo:
+            raise ValueError(
+                "mandá 'documentos' o 'opciones', no las dos: no se sabe cuál gana"
+            )
+        if tiene_viejo:
+            datos = dict(datos)
+            datos["documentos"] = [{
+                "opciones": datos.pop("opciones"),
+                "rango": datos.pop("rango", {}),
+                "terminaciones": datos.pop("terminaciones", []),
+            }]
+        return datos
 
 
 class PedidoFotos(BaseModel):
