@@ -90,8 +90,45 @@ def _shape_admin(db: sqlite3.Connection, order: sqlite3.Row) -> dict:
     if order["tipo"] == "fotocopias":
         ops = opciones["opciones"]
         rango = opciones.get("rango") or {}
+
+        # Un pedido puede traer varios documentos, cada uno con su propia
+        # configuración. Sin esta lista, el operador ve solo la del primero y no
+        # sabe qué está saliendo por la impresora.
+        #
+        # Los pedidos viejos (anteriores a varios documentos) no tienen la
+        # clave: se arma una lista de uno con lo que hay, así el panel no
+        # necesita distinguir entre unos y otros.
+        crudos = opciones.get("documentos") or [{
+            "archivo": archivos[0] if archivos else None,
+            "opciones": ops,
+            "rango": rango,
+            "terminaciones": opciones.get("terminaciones") or [],
+            "paginas_documento": opciones.get("paginas_documento"),
+            "paginas_a_imprimir": opciones.get("paginas_a_imprimir"),
+        }]
+
+        documentos = []
+        for d in crudos:
+            o = d.get("opciones") or {}
+            r = d.get("rango") or {}
+            nombre = d.get("archivo")
+            documentos.append({
+                "archivo": nombre,
+                "paginas": d.get("paginas_documento"),
+                "paginas_a_imprimir": d.get("paginas_a_imprimir"),
+                "copias": o.get("copias"),
+                "color": o.get("color") == "color",
+                "doble": o.get("caras") == "doble",
+                "tamano": o.get("tamano"),
+                "rango": r.get("valor") if r.get("modo") == "rango" else None,
+                "acabado": " · ".join(d.get("terminaciones") or []) or None,
+                "subtotal": d.get("subtotal"),
+                "fallado": nombre in fallados,
+            })
+
         base.update(
             {
+                "documentos": documentos,
                 "paginas": opciones.get("paginas_documento"),
                 "paginas_a_imprimir": opciones.get("paginas_a_imprimir"),
                 "copias": ops["copias"],
@@ -107,6 +144,7 @@ def _shape_admin(db: sqlite3.Connection, order: sqlite3.Row) -> dict:
     else:
         base.update(
             {
+                "documentos": [],
                 "paginas": None,
                 "paginas_a_imprimir": None,
                 "copias": None,

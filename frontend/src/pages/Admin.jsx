@@ -207,6 +207,49 @@ const StatsRow = ({ orders }) => {
 // ─────────────────────────────────────────────
 // ORDER CARD
 // ─────────────────────────────────────────────
+const IconoDoc = ({ className = 'w-4 h-4 text-red-400 shrink-0' }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+  </svg>
+);
+
+// Una línea por documento. Los que no llegaron a la impresora van resaltados:
+// el pedido ya se cobró, así que el operador tiene que reimprimirlos o avisarle
+// al cliente ANTES de entregar.
+const FilaDocumento = ({ doc, order }) => {
+  if (!doc) {
+    return (
+      <div className="flex items-center gap-2">
+        <IconoDoc />
+        <span className="text-xs text-stone-400 truncate">{order.archivo}</span>
+      </div>
+    );
+  }
+  return (
+    <div className={`flex items-start gap-2 ${doc.fallado ? 'bg-red-500/10 border border-red-500/40 rounded-lg px-2 py-1.5' : ''}`}>
+      <IconoDoc className={`w-4 h-4 shrink-0 mt-0.5 ${doc.fallado ? 'text-red-400' : 'text-stone-500'}`} />
+      <div className="min-w-0 flex-1">
+        <p className={`text-xs truncate ${doc.fallado ? 'text-red-300 font-bold' : 'text-stone-300'}`}>
+          {doc.archivo || order.archivo}
+        </p>
+        <p className="text-[10px] text-stone-500">
+          {doc.paginas_a_imprimir ?? doc.paginas} pág × {doc.copias} {doc.copias > 1 ? 'copias' : 'copia'}
+          {' · '}{doc.color ? 'Color' : 'B/N'}
+          {' · '}{doc.doble ? 'Doble cara' : 'Una cara'}
+          {' · '}{doc.tamano}
+          {doc.rango ? ` · Rango ${doc.rango}` : ''}
+          {doc.acabado ? ` · ${doc.acabado}` : ''}
+        </p>
+        {doc.fallado && (
+          <p className="text-[10px] font-bold text-red-400 mt-0.5">
+            No salió por la impresora — reimprimilo antes de entregar
+          </p>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const OrderCard = ({ order, onTransition, onCancel }) => {
   const [contactOpen, setContactOpen] = useState(false);
 
@@ -269,35 +312,42 @@ const OrderCard = ({ order, onTransition, onCancel }) => {
             </div>
           </div>
 
-          {/* Archivo */}
-          <div className="flex items-center gap-2 mb-3">
-            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-            </svg>
-            <span className="text-xs text-stone-400 truncate">{order.archivo}</span>
-          </div>
-
-          {/* Specs */}
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <span className="text-xs text-stone-400">
-              {order.tipo === 'fotos' ? (
-                <>
+          {/* Documentos del pedido. Cada uno con su configuración: con varios,
+              saber solo la del primero no le sirve al operador. */}
+          {order.tipo === 'fotos' ? (
+            <>
+              <div className="flex items-center gap-2 mb-3">
+                <IconoDoc />
+                <span className="text-xs text-stone-400 truncate">{order.archivo}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <span className="text-xs text-stone-400">
                   Especial: {order.material}
                   {order.formato ? ` ${order.formato}` : ''}
                   {order.gramaje ? ` ${order.gramaje}g` : ''}
                   {' · '}{(order.archivos ?? [order.archivo]).length} archivo{(order.archivos ?? [1]).length !== 1 ? 's' : ''}
                   {order.acabado ? ` · ${order.acabado}` : ''}
-                </>
-              ) : (
-                <>
-                  {order.paginas} pág × {order.copias} {order.copias > 1 ? 'copias' : 'copia'} · {order.color ? 'Color' : 'B/N'} · {order.doble ? 'Doble cara' : 'Una cara'}
-                  {order.rango ? ` · Rango ${order.rango}` : ''}
-                  {order.acabado ? ` · ${order.acabado}` : ''}
-                </>
-              )}
-            </span>
-            <span className="text-sm font-black text-amber-400 shrink-0">{ars(order.precio)}</span>
-          </div>
+                </span>
+                <span className="text-sm font-black text-amber-400 shrink-0">{ars(order.precio)}</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="space-y-1.5 mb-3">
+                {(order.documentos?.length ? order.documentos : [null]).map((doc, i) => (
+                  <FilaDocumento key={i} doc={doc} order={order} />
+                ))}
+              </div>
+              <div className="flex items-center justify-end gap-2">
+                {order.documentos?.length > 1 && (
+                  <span className="text-[10px] text-stone-500 mr-auto">
+                    {order.documentos.length} documentos
+                  </span>
+                )}
+                <span className="text-sm font-black text-amber-400 shrink-0">{ars(order.precio)}</span>
+              </div>
+            </>
+          )}
         </div>
 
         {/* Acciones */}
