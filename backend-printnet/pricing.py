@@ -12,6 +12,7 @@ Los pedidos de /fotos NO tienen precio acá: se cotizan manualmente
 cobran en el local y no pasan por este motor.
 """
 
+from dataclasses import dataclass, field
 from math import ceil
 
 # ---------------------------------------------------------------------------
@@ -127,3 +128,90 @@ def calcular_precio_fotocopias(
     if terminaciones and "Anillado" in terminaciones:
         total += precio_anillado(hojas_copia, copias)
     return total
+
+
+# ---------------------------------------------------------------------------
+# Pedidos con varios documentos
+#
+# DECISIÓN DE NEGOCIO (2026-08-26): el tramo de descuento se calcula sobre el
+# TOTAL del pedido, sumando todos los documentos; cada documento usa después su
+# propia tabla según color y caras.
+#
+# El motivo no es técnico: si cada documento tuviera su propio tramo, quien
+# trae su trabajo partido en tres archivos pagaría más que quien lo trae en uno
+# solo, por el mismo trabajo. En cuanto un cliente lo nota, es un reclamo con
+# razón y no hay cómo defenderlo.
+#
+# calcular_precio_fotocopias() de arriba NO se toca: sigue cotizando un
+# documento y sigue siendo la única fuente de la fórmula. Lo único que cambia
+# es qué cantidad se usa para elegir el tramo.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Documento:
+    """Un documento ya listo para cotizar: el rango de páginas ya se resolvió."""
+
+    paginas: int
+    copias: int = 1
+    color: str = "byn"
+    caras: str = "simple"
+    tamano: str = "A4"
+    terminaciones: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class LineaPrecio:
+    """Lo que sale de cotizar un documento, para poder mostrarle el desglose
+    al cliente: si el precio surge de sumar documentos, tiene que poder ver de
+    dónde salió."""
+
+    cantidad: int      # hojas físicas × copias de ESTE documento
+    unitario: int      # precio por unidad, según el tramo GLOBAL del pedido
+    subtotal: int
+
+
+@dataclass(frozen=True)
+class PrecioPedido:
+    total: int
+    cantidad_total: int   # la suma que definió el tramo
+    documentos: list[LineaPrecio]
+
+
+def _cantidad(d: Documento) -> int:
+    return hojas_por_copia(d.paginas, d.caras) * d.copias
+
+
+def calcular_precio_pedido(documentos: list[Documento]) -> PrecioPedido:
+    """Precio de un pedido completo, con uno o varios documentos.
+
+    Con un solo documento devuelve exactamente lo mismo que
+    `calcular_precio_fotocopias`: sumar un elemento da ese elemento, así que
+    el tramo global y el de la línea coinciden. Está cubierto por un barrido
+    completo en test_pricing_pedido.py, porque todos los pedidos que existían
+    antes de este cambio son de un documento.
+    """
+    if not documentos:
+        return PrecioPedido(total=0, cantidad_total=0, documentos=[])
+
+    cantidades = [_cantidad(d) for d in documentos]
+    cantidad_total = sum(cantidades)
+
+    lineas = []
+    for d, cantidad in zip(documentos, cantidades):
+        # El tramo sale de la cantidad GLOBAL; la tabla, del color y las caras
+        # de ESTE documento.
+        unitario = precio_unitario(d.color, d.caras, cantidad_total)
+        multiplicador = RECARGO_A3 if d.tamano == "A3" else 1
+        subtotal = round(cantidad * unitario * multiplicador)
+
+        if d.terminaciones and "Anillado" in d.terminaciones:
+            subtotal += precio_anillado(hojas_por_copia(d.paginas, d.caras), d.copias)
+
+        lineas.append(LineaPrecio(cantidad=cantidad, unitario=unitario, subtotal=subtotal))
+
+    return PrecioPedido(
+        total=sum(l.subtotal for l in lineas),
+        cantidad_total=cantidad_total,
+        documentos=lineas,
+    )
