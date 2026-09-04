@@ -1,4 +1,4 @@
-<#
+﻿<#
     PrintNet — registro de servicios de Windows con NSSM.
 
     Registra dos servicios con arranque automático y reinicio ante caída:
@@ -12,6 +12,15 @@
 
     Requiere: NSSM (https://nssm.cc/release/nssm-2.24.zip → win64\nssm.exe)
               cloudflared instalado y el túnel 'printnet' ya creado.
+
+    OJO, dos cosas del archivo en sí (no del código):
+      - NO usar here-strings (arroba-comilla). Windows PowerShell 5.1 no los
+        reconoce si el archivo tiene finales de línea de Unix, y en vez de
+        fallar con un mensaje claro empieza a interpretar el texto del
+        mensaje como código. Para varias líneas, varios Write-Host.
+      - El archivo va en UTF-8 CON BOM y con finales CRLF (ver
+        .gitattributes en la raíz). Sin BOM, PowerShell 5.1 lo lee como
+        ANSI y los acentos salen rotos: "túnel" imprime "tÃºnel".
 #>
 
 [CmdletBinding()]
@@ -52,12 +61,10 @@ if (-not $NssmPath) {
     $NssmPath = $candidatos | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
 }
 if (-not $NssmPath -or -not (Test-Path $NssmPath)) {
-    Write-Falla @"
-No encontré nssm.exe.
-Descargalo de https://nssm.cc/release/nssm-2.24.zip, sacá win64\nssm.exe
-y copialo junto a este script, o volvé a ejecutar con:
-    -NssmPath "C:\ruta\a\nssm.exe"
-"@
+    Write-Falla "No encontré nssm.exe."
+    Write-Host "    Descargalo de https://nssm.cc/release/nssm-2.24.zip, sacá win64\nssm.exe"
+    Write-Host "    y copialo junto a este script, o volvé a ejecutar con:"
+    Write-Host '        -NssmPath "C:\ruta\a\nssm.exe"'
     exit 1
 }
 Write-Ok "NSSM: $NssmPath"
@@ -96,14 +103,12 @@ if (-not (Test-Path (Join-Path $InstallDir ".env"))) {
 # rutas absolutas a los archivos que el instalador copió acá.
 $TunnelConfig = Join-Path $InstallDir "cloudflared\config.yml"
 if (-not (Test-Path $TunnelConfig)) {
-    Write-Falla @"
-Falta $TunnelConfig
-El instalador debe copiar a $InstallDir\cloudflared\:
-  - config.yml           (con tunnel, credentials-file e ingress)
-  - <UUID-del-tunel>.json (credenciales del túnel)
-  - cert.pem              (certificado de origen)
-Ver README.md para el contenido esperado de config.yml.
-"@
+    Write-Falla "Falta $TunnelConfig"
+    Write-Host "    El instalador debe copiar a $InstallDir\cloudflared\:"
+    Write-Host "      - config.yml            (con tunnel, credentials-file e ingress)"
+    Write-Host "      - <UUID-del-tunel>.json (credenciales del túnel)"
+    Write-Host "      - cert.pem              (certificado de origen)"
+    Write-Host "    Ver README.md para el contenido esperado de config.yml."
     exit 1
 }
 Write-Ok "Config del túnel: $TunnelConfig"

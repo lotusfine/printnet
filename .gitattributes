@@ -1,0 +1,10 @@
+# Los scripts de PowerShell se instalan en la notebook del local, que corre
+# Windows PowerShell 5.1. Con finales de línea de Unix, 5.1 no reconoce los
+# here-strings y falla con errores de sintaxis que no señalan la causa real.
+# Se fuerza CRLF pase lo que pase en la máquina donde se editen.
+*.ps1 text eol=crlf
+
+# Los .bat y los .iss (Inno Setup) los lee el mismo Windows: misma razón.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.iss text eol=crlf

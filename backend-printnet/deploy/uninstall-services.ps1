@@ -1,4 +1,4 @@
-<#
+﻿<#
     PrintNet — baja de los servicios de Windows.
     Lo ejecuta el desinstalador de Inno Setup; también sirve a mano:
       powershell -ExecutionPolicy Bypass -File uninstall-services.ps1
