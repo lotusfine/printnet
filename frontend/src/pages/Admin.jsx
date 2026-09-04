@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { borrarToken, guardarToken, leerToken } from '../adminAuth';
-import { listarPedidosAdmin, cambiarEstadoPedido, listarImpresoras } from '../api';
+import { listarPedidosAdmin, cambiarEstadoPedido, listarImpresoras, reimprimirPedido } from '../api';
 
 // ─────────────────────────────────────────────
 // DATOS DE RELLENO (solo impresoras)
@@ -250,7 +250,7 @@ const FilaDocumento = ({ doc, order }) => {
   );
 };
 
-const OrderCard = ({ order, onTransition, onCancel }) => {
+const OrderCard = ({ order, onTransition, onCancel, onReimprimir }) => {
   const [contactOpen, setContactOpen] = useState(false);
 
   const Btn = ({ onClick, children, variant = 'ghost' }) => {
@@ -350,12 +350,18 @@ const OrderCard = ({ order, onTransition, onCancel }) => {
           )}
         </div>
 
-        {/* Acciones */}
-        {actions[order.estado] && (
-          <div className="px-4 pb-4 flex flex-wrap gap-2">
-            {actions[order.estado]}
-          </div>
-        )}
+        {/* Acciones. Reimprimir va aparte y SIEMPRE está disponible: la
+            impresión se dispara una sola vez al confirmar el pago, así que sin
+            este botón un pedido que falló quedaba muerto. Incluso desde
+            "cancelado", que era un callejón sin salida. */}
+        <div className="px-4 pb-4 flex flex-wrap gap-2">
+          {actions[order.estado]}
+          {order.tipo === 'fotocopias' && (
+            <Btn onClick={() => onReimprimir(order)}>
+              {order.documentos_fallados?.length ? 'Reimprimir lo que falló' : 'Reimprimir'}
+            </Btn>
+          )}
+        </div>
       </div>
 
       {/* Modal contacto */}
@@ -405,7 +411,7 @@ const FILTERS = [
   { key: 'listo', label: 'Listos' },
 ];
 
-const OrdersSection = ({ orders, onTransition, onCancel }) => {
+const OrdersSection = ({ orders, onTransition, onCancel, onReimprimir }) => {
   const [filter, setFilter] = useState('todos');
 
   const visible = filter === 'todos' ? orders : orders.filter(o => o.estado === filter);
@@ -444,6 +450,7 @@ const OrdersSection = ({ orders, onTransition, onCancel }) => {
               order={order}
               onTransition={onTransition}
               onCancel={onCancel}
+              onReimprimir={onReimprimir}
             />
           ))
         )}
@@ -742,6 +749,30 @@ const AdminPanel = ({ onLogout }) => {
     }
   };
 
+  // Reimprimir gasta papel de verdad, así que se confirma diciendo cuánto.
+  // El operador está parado frente a la impresora: si sale de más, lo ve.
+  const handleReimprimir = async (order) => {
+    const fallados = order.documentos_fallados || [];
+    const soloFallados = fallados.length > 0 && fallados.length < (order.archivos?.length || 1);
+    const cuantos = soloFallados ? fallados.length : (order.archivos?.length || 1);
+    const detalle = soloFallados
+      ? `Reimprimir ${fallados.length} documento(s) que no salieron:\n${fallados.join('\n')}`
+      : `Reimprimir los ${cuantos} documento(s) del pedido #${order.id}`;
+
+    if (!confirm(`${detalle}\n\nVa a salir papel de la impresora. ¿Confirmás?`)) return;
+
+    try {
+      const actualizado = await reimprimirPedido(order.id);
+      setOrders((prev) => prev.map((o) => (o.id === order.id ? actualizado : o)));
+      const r = actualizado.reimpresion || {};
+      if (r.fallados) {
+        alert(`Se mandaron ${r.despachados} de ${r.total}. ${r.fallados} no entraron a la impresora — revisá que esté encendida y con papel.`);
+      }
+    } catch (e) {
+      alert(`No se pudo reimprimir: ${e.message}`);
+    }
+  };
+
   const handleCancelRequest = (id) => setCancelTarget(id);
 
   const handleCancelConfirm = async () => {
@@ -861,7 +892,7 @@ const AdminPanel = ({ onLogout }) => {
             <div className="h-24 bg-stone-800/60 border border-stone-700 rounded-xl animate-pulse" />
           )}
           <StatsRow orders={orders} />
-          <OrdersSection orders={orders} onTransition={handleTransition} onCancel={handleCancelRequest} />
+          <OrdersSection orders={orders} onTransition={handleTransition} onCancel={handleCancelRequest} onReimprimir={handleReimprimir} />
         </div>
       </main>
 

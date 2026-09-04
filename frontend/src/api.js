@@ -70,6 +70,17 @@ export async function cambiarEstadoPedido(id, estado) {
   );
 }
 
+/** Vuelve a mandar un pedido a la impresora. Sin `fileId`, todos sus documentos. */
+export async function reimprimirPedido(id, fileId) {
+  const qs = fileId ? `?file_id=${fileId}` : '';
+  return parse(
+    await fetch(`${PRINTNET_API}/admin/orders/${id}/reimprimir${qs}`, {
+      method: 'POST',
+      headers: cabecerasAdmin(),
+    })
+  );
+}
+
 /** Impresoras registradas en el backend. */
 export async function listarImpresoras() {
   return parse(

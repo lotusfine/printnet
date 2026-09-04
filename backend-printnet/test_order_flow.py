@@ -53,12 +53,17 @@ os.environ["PRINTNET_DISPATCH"] = "falso"
 database.init_db()
 
 
+_contador = [0]
+
+
 def armar_pedido(archivos: list[str], documentos: list[dict] | None = None) -> int:
     """Crea un pedido pagado-pendiente con esos archivos. Devuelve su id."""
+    _contador[0] += 1
+    n = _contador[0]
     conn = database.get_conn()
     cur = conn.execute(
         "INSERT INTO customers (nombre, telefono, email) VALUES (?, ?, ?)",
-        ("Ana", "+5492211234567", f"ana{len(archivos)}@x.com"),
+        ("Ana", "+5492211234567", f"ana{n}@x.com"),
     )
     customer_id = cur.lastrowid
     opciones = {"opciones": {"color": "byn", "caras": "simple", "copias": 1, "tamano": "A4"},
@@ -69,7 +74,7 @@ def armar_pedido(archivos: list[str], documentos: list[dict] | None = None) -> i
         """INSERT INTO orders (token, tipo, customer_id, estado, pagado,
                                requiere_manual, precio_total, opciones)
            VALUES (?, 'fotocopias', ?, 'pendiente_pago', 0, 0, 1000, ?)""",
-        (f"tok-{len(archivos)}-{id(archivos)}", customer_id, json.dumps(opciones)),
+        (f"tok-{n}", customer_id, json.dumps(opciones)),
     )
     order_id = cur.lastrowid
     for a in archivos:
@@ -163,6 +168,72 @@ check("no se duplicaron los despachos", len(despachos), 2)
 
 
 # ─────────────────────────────────────────────
+# ─────────────────────────────────────────────
+print("\n== Reimprimir ==")
+# El operador tiene que poder volver a mandar un pedido a la impresora. Sin
+# esto, un pedido que falló quedaba muerto: la impresión se dispara una sola
+# vez, al confirmar el pago, y esa función es idempotente a propósito.
+
+from order_flow import reimprimir  # noqa: E402
+
+pid = armar_pedido(["a.pdf", "roto.pdf"])
+conn = database.get_conn()
+confirmar_pago(conn, pid)
+conn.commit()
+row, despachos = leer(pid)
+check("después del pago hay 2 intentos", len(despachos), 2)
+
+# Reintento de TODO el pedido
+r = reimprimir(conn, pid)
+conn.commit(); conn.close()
+row, despachos = leer(pid)
+check("reimprimir todo agrega 2 intentos más", len(despachos), 4)
+check("informa cuántos entraron", r["despachados"], 1)
+check("y cuántos fallaron", r["fallados"], 1)
+
+# Reintento de UN documento
+conn = database.get_conn()
+fid = conn.execute(
+    "SELECT id FROM files WHERE order_id = ? AND filename_original = 'a.pdf'", (pid,)
+).fetchone()["id"]
+r = reimprimir(conn, pid, file_ids=[fid])
+conn.commit(); conn.close()
+row, despachos = leer(pid)
+check("reimprimir uno solo agrega un intento", len(despachos), 5)
+check("y despacha solo ese", r["despachados"], 1)
+
+# Un pedido cancelado tiene que poder reimprimirse: era un callejón sin salida
+conn = database.get_conn()
+pid2 = armar_pedido(["x.pdf"])
+confirmar_pago(conn, pid2)
+conn.execute("UPDATE orders SET estado = 'cancelado' WHERE id = ?", (pid2,))
+conn.commit()
+r = reimprimir(conn, pid2)
+conn.commit(); conn.close()
+row, _ = leer(pid2)
+check("un pedido cancelado se puede reimprimir", r["despachados"], 1)
+check("y vuelve a estar en curso", row["estado"], "imprimiendo")
+
+# Reimprimir lo que salió bien limpia la marca de atención manual
+conn = database.get_conn()
+pid3 = armar_pedido(["bien.pdf"])
+confirmar_pago(conn, pid3)
+conn.execute("UPDATE orders SET requiere_manual = 1 WHERE id = ?", (pid3,))
+conn.commit()
+reimprimir(conn, pid3)
+conn.commit(); conn.close()
+row, _ = leer(pid3)
+check("si todo sale bien, deja de requerir atención", bool(row["requiere_manual"]), False)
+
+# Errores
+conn = database.get_conn()
+try:
+    reimprimir(conn, 99999)
+    check("un pedido inexistente da error", "no falló", "ValueError")
+except ValueError:
+    check("un pedido inexistente da error", True, True)
+conn.close()
+
 print()
 if fallos:
     print(f"✗ {len(fallos)} fallo(s): {', '.join(fallos)}")

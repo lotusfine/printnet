@@ -115,7 +115,10 @@ def protegidas(ruta_prefijo: str) -> dict[str, bool]:
 
 
 admin = protegidas("/admin")
-check("hay tres endpoints bajo /admin", len(admin), 3)
+# No se afirma un número exacto a propósito: lo que importa es que TODOS estén
+# protegidos, incluidos los que se agreguen después. Un endpoint definido fuera
+# del router aparecería igual en esta lista, y sin protección.
+check("hay endpoints de admin que verificar", len(admin) >= 3, True)
 for nombre, protegida in sorted(admin.items()):
     check(f"protegido: {nombre}", protegida, True)
 

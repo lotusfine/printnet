@@ -21,6 +21,7 @@ import notifications
 from auth import verificar_admin
 from database import get_db
 from models import ESTADOS, CambioEstado
+from order_flow import reimprimir as reimprimir_pedido
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(verificar_admin)])
 
@@ -219,6 +220,41 @@ def cambiar_estado(
 
     actualizado = db.execute(_ORDER_QUERY + " WHERE o.id = ?", (order_id,)).fetchone()
     return _shape_admin(db, actualizado)
+
+
+@router.post("/orders/{order_id}/reimprimir")
+def reimprimir_orden(
+    order_id: int,
+    file_id: int | None = Query(None, description="Reimprimir solo este documento"),
+    db: sqlite3.Connection = Depends(get_db),
+):
+    """Vuelve a mandar el pedido a la impresora.
+
+    Sin esto, un pedido que falló quedaba muerto: la impresión se dispara una
+    sola vez, al confirmar el pago, y esa función es idempotente a propósito
+    para que MercadoPago no imprima dos veces.
+
+    Se permite desde CUALQUIER estado, incluido `cancelado` — un pedido
+    cancelado por error no tenía ninguna salida, porque de ese estado no sale
+    ninguna transición.
+
+    Con `file_id` se reimprime un solo documento: si de tres falló uno, no
+    tiene sentido gastar papel en los otros dos.
+    """
+    row = db.execute(_ORDER_QUERY + " WHERE o.id = ?", (order_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, "pedido no encontrado")
+    if row["tipo"] != "fotocopias":
+        raise HTTPException(409, "los pedidos especiales se resuelven a mano, no se imprimen solos")
+
+    resultado = reimprimir_pedido(db, order_id, [file_id] if file_id else None)
+    db.commit()
+
+    if resultado["total"] == 0:
+        raise HTTPException(409, "no hay nada para imprimir: revisá que haya una impresora activa")
+
+    actualizado = db.execute(_ORDER_QUERY + " WHERE o.id = ?", (order_id,)).fetchone()
+    return {**_shape_admin(db, actualizado), "reimpresion": resultado}
 
 
 @router.get("/printers")
