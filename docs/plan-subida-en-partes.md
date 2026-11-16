@@ -94,7 +94,12 @@ lo corta, MercadoPago reintenta, y como `pagado = 1` recién se guarda al final,
 El arreglo: `confirmar_pago()` marca el pedido como pagado y **hace commit
 antes de despachar**; el despacho corre en segundo plano (`BackgroundTasks`,
 con su propia conexión a la base). La idempotencia pasa a ser real aun con
-reintentos simultáneos. Esto aplica también al modo fantasma y a `reimprimir`.
+reintentos simultáneos. Esto aplica también al modo fantasma.
+
+`reimprimir` queda sincrónico a propósito: el operador necesita ver en el
+momento cuántos documentos entraron. Si la medición muestra que un PDF de
+300 MB tarda más de 100 s, se documenta como trampa (Cloudflare corta la
+respuesta pero la impresora sigue: mirar antes de volver a apretar).
 
 ### Timeouts de LibreOffice y SumatraPDF
 
@@ -136,5 +141,8 @@ Puede que con 300 MB no alcancen. Se ajustan según lo que mida el paso 0.
 despachar, y una segunda confirmación mientras el despacho corre no vuelve a
 imprimir.
 
-De punta a punta: `prueba_pedido.py` con un archivo grande contra el backend
-local, y después contra la notebook.
+De punta a punta: en el navegador, con un PDF de 150 MB contra el backend
+local (barra, reintentos, cancelar, pago en modo fantasma), y después en
+producción con uno de más de 100 MB hasta llegar a MercadoPago.
+`prueba_pedido.py` sigue probando el camino viejo, que tiene que seguir
+andando mientras la web vieja esté publicada.
