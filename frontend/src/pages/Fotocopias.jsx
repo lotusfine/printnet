@@ -4,7 +4,7 @@ import ContactForm, { validateContacto, composeTelefono, DEFAULT_CONTACTO } from
 import FileUpload from '../components/fotocopias/FileUpload';
 import PrintOptions from '../components/fotocopias/PrintOptions';
 import OrderSummary from '../components/fotocopias/OrderSummary';
-import { crearPedido } from '../api';
+import { crearPedidoConSubidas } from '../api';
 import { PEDIDOS_HABILITADOS } from '../config';
 import { paginasDelRango } from '../precio';
 import PedidosDeshabilitados from '../components/PedidosDeshabilitados';
@@ -54,7 +54,12 @@ const Fotocopias = () => {
       name: f.name,
       paginas: null,
       convertido: false,
-      estado: 'contando',
+      estado: 'subiendo',
+      progreso: { enviado: 0, total: f.size },
+      uploadId: null,
+      // Para cortar la subida si el cliente quita el documento a la mitad:
+      // con 300 MB, seguir subiendo algo que nadie va a usar es tiempo y disco.
+      cancelar: new AbortController(),
       error: null,
       opciones: { ...OPCIONES_VACIAS },
       rango: { ...RANGO_POR_DEFECTO },
@@ -66,6 +71,7 @@ const Fotocopias = () => {
   };
 
   const quitarDoc = (id) => {
+    docs.find((d) => d.id === id)?.cancelar?.abort();
     setDocs((prev) => {
       const restantes = prev.filter((d) => d.id !== id);
       setSeleccionado((sel) => (sel === id ? restantes[0]?.id ?? null : sel));
@@ -86,7 +92,9 @@ const Fotocopias = () => {
   const cotizables = docs.map(paraCotizar);
   const conError = docs.filter((d) => d.estado === 'error');
   const sinConfigurar = docs.filter((d) => d.estado === 'listo' && !configurado(d));
-  const contando = docs.some((d) => d.estado === 'contando');
+  // Mientras haya algo subiendo o preparándose no se puede pagar: el pedido
+  // necesita los ids de las subidas ya listas.
+  const contando = docs.some((d) => d.estado === 'subiendo' || d.estado === 'contando');
 
   const handlePay = async () => {
     if (envio.estado === 'enviando') return;
@@ -123,7 +131,7 @@ const Fotocopias = () => {
         rango: d.rango,
         terminaciones: [],
       }));
-      const pedido = await crearPedido(
+      const pedido = await crearPedidoConSubidas(
         {
           tipo: 'fotocopias',
           contacto: {
@@ -133,7 +141,7 @@ const Fotocopias = () => {
           },
           documentos,
         },
-        docs.map((d) => d.file)
+        docs.map((d) => d.uploadId)
       );
       if (pedido.init_point) {
         setEnvio({ estado: 'redirigiendo' });

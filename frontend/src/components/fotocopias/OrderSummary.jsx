@@ -14,7 +14,9 @@ const OrderSummary = ({ documentos, cotizables, onPay, enviando = false, bloquea
   const hayAlgo = listos.length > 0;
 
   const conError = documentos.filter((d) => d.estado === 'error');
-  const contando = documentos.filter((d) => d.estado === 'contando');
+  // 'subiendo' cuenta igual que 'contando': todavía no hay páginas, así que ni
+  // precio ni "sin configurar".
+  const contando = documentos.filter((d) => d.estado === 'subiendo' || d.estado === 'contando');
   const sinConfigurar = documentos.length - listos.length - conError.length - contando.length;
 
   return (
@@ -44,11 +46,13 @@ const OrderSummary = ({ documentos, cotizables, onPay, enviando = false, bloquea
                   }`}>
                     {doc.estado === 'error'
                       ? 'con problema'
-                      : doc.estado === 'contando'
-                        ? 'leyendo…'
-                        : cotizables[i]
-                          ? `$${linea.subtotal.toLocaleString('es-AR')}`
-                          : 'sin configurar'}
+                      : doc.estado === 'subiendo'
+                        ? 'subiendo…'
+                        : doc.estado === 'contando'
+                          ? 'leyendo…'
+                          : cotizables[i]
+                            ? `$${linea.subtotal.toLocaleString('es-AR')}`
+                            : 'sin configurar'}
                   </span>
                 </div>
               );
@@ -81,7 +85,7 @@ const OrderSummary = ({ documentos, cotizables, onPay, enviando = false, bloquea
               {conError.length > 0
                 ? `Quitá o reemplazá ${conError.length === 1 ? 'el documento con problema' : `los ${conError.length} documentos con problema`} para continuar.`
                 : contando.length > 0
-                  ? 'Esperando a que se lean los documentos…'
+                  ? 'Esperando a que se suban y se lean los documentos…'
                   : `Falta configurar ${sinConfigurar} ${sinConfigurar === 1 ? 'documento' : 'documentos'}.`}
             </p>
           )}

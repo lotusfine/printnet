@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { contarPaginas } from '../../api';
+import { subirArchivo } from '../../api';
 import { MAX_ARCHIVO_BYTES, MAX_ARCHIVO_MB, formatearTamano } from '../../limites';
 import { ACCEPT, describirExtension, esAceptado, esConvertible } from '../../formatos';
 
@@ -27,6 +27,8 @@ export const validateRango = (valor) => {
 
 const explicarError = (e) => {
   if (e?.status === 413) return { mensaje: `Supera el máximo de ${MAX_ARCHIVO_MB} MB.`, detalle: '' };
+  // 503: el servidor está lleno de subidas en curso; el mensaje ya lo explica.
+  if (e?.status === 503) return { mensaje: e.message, detalle: '' };
   if (e?.status === 422) {
     return { mensaje: e?.message || 'No pudimos leer este documento.', detalle: '' };
   }
@@ -47,10 +49,18 @@ const FileUpload = ({ documentos, seleccionado, onSeleccionar, onAgregar, onActu
 
   const procesar = async (doc) => {
     try {
-      const { paginas, convertido } = await contarPaginas(doc.file);
-      onActualizar(doc.id, { paginas, convertido: Boolean(convertido), estado: 'listo', error: null });
+      const { id, paginas, convertido } = await subirArchivo(doc.file, {
+        signal: doc.cancelar.signal,
+        alProgresar: (p) => onActualizar(doc.id, p.fase === 'preparando'
+          ? { estado: 'contando', progreso: null }
+          : { estado: 'subiendo', progreso: p }),
+      });
+      onActualizar(doc.id, {
+        uploadId: id, paginas, convertido: Boolean(convertido), estado: 'listo', error: null, progreso: null,
+      });
     } catch (e) {
-      onActualizar(doc.id, { paginas: null, estado: 'error', error: explicarError(e) });
+      if (e?.name === 'AbortError') return;  // lo quitó el cliente: no hay nada que mostrar
+      onActualizar(doc.id, { paginas: null, estado: 'error', error: explicarError(e), progreso: null });
     }
   };
 
@@ -71,8 +81,8 @@ const FileUpload = ({ documentos, seleccionado, onSeleccionar, onAgregar, onActu
         rechazos.push(`"${f.name}": no aceptamos archivos ${describirExtension(f.name)}.`);
         continue;
       }
-      // El tope es sobre la SUMA: el límite lo pone Cloudflare por petición,
-      // y el pedido entero viaja en una sola.
+      // El tope es sobre la SUMA del pedido: el backend la vuelve a controlar
+      // al crearlo (subidas.MAX_PEDIDO_BYTES).
       if (acumulado + f.size > MAX_ARCHIVO_BYTES) {
         rechazos.push(
           `"${f.name}" (${formatearTamano(f.size)}) no entra: el total no puede pasar de ${MAX_ARCHIVO_MB} MB.`
@@ -151,7 +161,7 @@ const FileUpload = ({ documentos, seleccionado, onSeleccionar, onAgregar, onActu
             activo={doc.id === seleccionado}
             onSeleccionar={() => onSeleccionar(doc.id)}
             onQuitar={() => onQuitar(doc.id)}
-            onReintentar={() => { onActualizar(doc.id, { estado: 'contando', error: null }); procesar(doc); }}
+            onReintentar={() => { onActualizar(doc.id, { estado: 'subiendo', error: null, progreso: { enviado: 0, total: doc.file.size } }); procesar(doc); }}
           />
         ))}
       </div>
@@ -196,12 +206,23 @@ const DocumentoFila = ({ doc, activo, onSeleccionar, onQuitar, onReintentar }) =
         <div className="min-w-0 flex-1">
           <p className="text-sm font-bold text-stone-700 truncate">{doc.name}</p>
           <p className={`text-xs ${roto ? 'text-red-600' : 'text-stone-400'}`}>
-            {doc.estado === 'contando'
-              ? (esConvertible(doc.name) ? 'Convirtiendo a PDF…' : 'Leyendo tu documento…')
-              : roto
-                ? doc.error?.mensaje
-                : `${doc.paginas} ${doc.paginas === 1 ? 'página' : 'páginas'}${doc.convertido ? ' · convertido a PDF' : ''}`}
+            {doc.estado === 'subiendo'
+              ? `Subiendo… ${formatearTamano(doc.progreso?.enviado || 0)} de ${formatearTamano(doc.progreso?.total || doc.file.size)}`
+              : doc.estado === 'contando'
+                ? (esConvertible(doc.name) ? 'Convirtiendo a PDF…' : 'Preparando tu documento…')
+                : roto
+                  ? doc.error?.mensaje
+                  : `${doc.paginas} ${doc.paginas === 1 ? 'página' : 'páginas'}${doc.convertido ? ' · convertido a PDF' : ''}`}
           </p>
+
+          {doc.estado === 'subiendo' && (
+            <div className="mt-1.5 h-1.5 w-full rounded-full bg-stone-200 overflow-hidden">
+              <div
+                className="h-full bg-amber-500 transition-all duration-300"
+                style={{ width: `${Math.round(100 * (doc.progreso?.enviado || 0) / (doc.progreso?.total || doc.file.size || 1))}%` }}
+              />
+            </div>
+          )}
 
           {listo && (
             <p className={`mt-1 text-[11px] ${completo ? 'text-stone-500' : 'text-amber-700 font-bold'}`}>

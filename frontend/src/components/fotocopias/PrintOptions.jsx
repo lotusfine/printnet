@@ -83,7 +83,7 @@ const PrintOptions = ({ documento, cantidadDocumentos, onChange, onRangoChange, 
         {documento.name}
       </p>
 
-      {documento.estado === 'contando' ? (
+      {documento.estado === 'subiendo' || documento.estado === 'contando' ? (
         <p className="text-sm text-center text-stone-400 italic py-6">
           Esperando a que se lea el documento…
         </p>
