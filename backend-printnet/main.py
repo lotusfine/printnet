@@ -6,6 +6,7 @@ Correr localmente:
 Ver SPEC.md para el contrato completo de la API.
 """
 
+import asyncio
 import logging
 import os
 import sys
@@ -25,8 +26,10 @@ _BASE = (
 )
 load_dotenv(_BASE / ".env")
 
+import subidas
 from database import init_db
 from routers import admin, orders, webhooks
+from routers import subidas as subidas_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -34,10 +37,25 @@ logging.basicConfig(
 )
 
 
+async def _limpiar_subidas_cada_hora():
+    """Borra las subidas que nunca terminaron en pedido (ver subidas.VIDA_SEG)."""
+    logger = logging.getLogger("printnet.subidas")
+    while True:
+        try:
+            borradas = await asyncio.to_thread(subidas.limpiar_viejas)
+            if borradas:
+                logger.info("Limpieza: %d subida(s) abandonada(s) borrada(s)", borradas)
+        except Exception:  # noqa: BLE001 — la limpieza nunca puede tirar el servidor
+            logger.exception("Falló la limpieza de subidas")
+        await asyncio.sleep(3600)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    limpieza = asyncio.create_task(_limpiar_subidas_cada_hora())
     yield
+    limpieza.cancel()
 
 
 app = FastAPI(
@@ -63,6 +81,7 @@ app.add_middleware(
 app.include_router(orders.router)
 app.include_router(admin.router)
 app.include_router(webhooks.router)
+app.include_router(subidas_router.router)
 
 
 @app.get("/")
