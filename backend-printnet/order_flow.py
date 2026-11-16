@@ -84,6 +84,11 @@ def despachar_pedido(conn: sqlite3.Connection, order_id: int, file_ids=None) -> 
             (order_id, printer["id"], archivo["id"], dispatcher.nombre,
              int(resultado.ok), resultado.detalle),
         )
+        # Commit por documento, no al final. Si algo revienta en el tercero,
+        # el historial de los dos que ya salieron queda (antes el rollback lo
+        # borraba y reimprimir volvía a mandarlos). Y la base no queda trabada
+        # para los demás pedidos mientras SumatraPDF abre un PDF de 300 MB.
+        conn.commit()
         if resultado.ok:
             despachados += 1
 
@@ -203,6 +208,36 @@ def despachar_tras_pago(order_id: int) -> str:
             conn.commit()
         except Exception:
             logger.exception("Pedido %s: tampoco se pudo marcar para revisión", order_id)
-        raise
+        # Sin relanzar: corre como tarea de fondo, y Starlette corta las
+        # tareas siguientes cuando una tira excepción. Relanzando, un despacho
+        # fallido se llevaba puesto el email "pedido recibido" del cliente.
+        return "pendiente"
     finally:
         conn.close()
+
+
+def marcar_despachos_interrumpidos(conn: sqlite3.Connection) -> int:
+    """Al arrancar: pedidos pagados que se quedaron sin imprimir. Devuelve cuántos.
+
+    El pago se guarda y la impresión corre después, en segundo plano. Si el
+    servicio se reinicia en ese intervalo (un deploy, un corte de luz), la
+    impresión no corre nunca: MercadoPago ya recibió su 200 y no reintenta.
+    El pedido quedaría en 'pendiente' igual que uno en cola, sin que nadie se
+    entere.
+
+    Se marcan para el operador en vez de reimprimirlos solos: si el proceso
+    murió con SumatraPDF ya trabajando, el papel puede haber salido aunque el
+    registro no, y reimprimir a ciegas sería cobrar una vez e imprimir dos.
+    """
+    cur = conn.execute(
+        """UPDATE orders SET requiere_manual = 1, updated_at = datetime('now')
+            WHERE tipo = 'fotocopias' AND pagado = 1 AND estado = 'pendiente'
+              AND requiere_manual = 0
+              AND NOT EXISTS (SELECT 1 FROM dispatch_log d WHERE d.order_id = orders.id)"""
+    )
+    if cur.rowcount:
+        logger.warning(
+            "%d pedido(s) pagado(s) se quedaron sin imprimir por un reinicio: "
+            "quedan marcados para revisión en el panel", cur.rowcount,
+        )
+    return cur.rowcount

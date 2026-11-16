@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+import shutil
 import sqlite3
 import tempfile
 import uuid
@@ -149,29 +150,38 @@ def _leer_ids_subidas(crudo: str, cantidad: int) -> list[str]:
     return ids
 
 
-def _archivos_de_subidas(ids: list[str]) -> list[dict]:
-    """Lo que hace falta para cotizar, SIN mover nada todavía.
+def _reservar_subidas(ids: list[str]) -> list[dict]:
+    """Aparta las subidas para este pedido. Todo o nada.
 
-    Si el pedido se rechaza después (un rango de páginas que no existe), el
-    cliente no pierde lo que subió: con 300 MB, perderlo es volver a esperar
-    la subida entera. Los archivos se mueven recién en `_tomar_subidas`.
+    La reserva es lo que hace seguro un doble clic en "pagar": el segundo
+    POST /orders recibe 409 en vez de pisarse con el primero (antes daba 500
+    y podía hacer perder las subidas). Si una no se puede reservar, se
+    devuelven las que ya se habían apartado.
+
+    Devuelve lo que hace falta para cotizar. Los archivos todavía no se tocan:
+    eso es `_tomar_subidas`, con el pedido ya validado.
     """
-    archivos = []
-    for id_ in ids:
-        try:
-            e = subidas.estado(id_)
-        except subidas.ErrorSubida as err:
-            raise HTTPException(err.status, err.mensaje)
-        if e["estado"] != "listo":
-            raise HTTPException(409, f"'{e['nombre']}' todavía no terminó de prepararse")
-        archivos.append({
-            "filename_original": e["nombre"],
-            "paginas": e["paginas"],
-            "size_bytes": e["tamano_bytes"],
-        })
-    if sum(a["size_bytes"] for a in archivos) > subidas.MAX_PEDIDO_BYTES:
-        raise HTTPException(
-            413, f"el pedido supera el máximo de {subidas.MAX_PEDIDO_MB} MB en total")
+    reservadas, archivos = [], []
+    try:
+        for id_ in ids:
+            e = subidas.reservar(id_)
+            reservadas.append(id_)
+            archivos.append({
+                "filename_original": e["nombre"],
+                "paginas": e["paginas"],
+                "size_bytes": e["tamano_bytes"],
+            })
+        if sum(a["size_bytes"] for a in archivos) > subidas.MAX_PEDIDO_BYTES:
+            raise HTTPException(
+                413, f"el pedido supera el máximo de {subidas.MAX_PEDIDO_MB} MB en total")
+    except subidas.ErrorSubida as err:
+        for id_ in reservadas:
+            subidas.devolver(id_)
+        raise HTTPException(err.status, err.mensaje)
+    except BaseException:
+        for id_ in reservadas:
+            subidas.devolver(id_)
+        raise
     return archivos
 
 
@@ -238,7 +248,7 @@ def crear_pedido(
         ]
         raise HTTPException(422, errores)
 
-    if files and uploads:
+    if files and uploads and uploads.strip() != "[]":
         raise HTTPException(422, "mandá 'files' o 'uploads', no los dos")
 
     token = str(uuid.uuid4())
@@ -249,7 +259,7 @@ def crear_pedido(
         if not isinstance(pedido, PedidoFotocopias):
             raise HTTPException(422, "la subida en partes es solo para fotocopias")
         ids_subidas = _leer_ids_subidas(uploads, len(pedido.documentos))
-        archivos = _archivos_de_subidas(ids_subidas)
+        archivos = _reservar_subidas(ids_subidas)
     else:
         files = files or []
         # 2) Validar archivos según el tipo de pedido
@@ -276,6 +286,27 @@ def crear_pedido(
         # 3) Guardar archivos y contar páginas reales
         archivos = _guardar_archivos(token, files)
 
+    if not ids_subidas:
+        return _cotizar_y_guardar(background, pedido, token, archivos, None, db)
+
+    # Si el pedido no llega a guardarse —un rango que no existe, MercadoPago
+    # caído, cualquier cosa— las subidas se devuelven intactas y se borra lo
+    # que se haya armado en la carpeta del pedido. Antes se perdían: el cliente
+    # tenía que volver a subir hasta 300 MB para reintentar el pago.
+    try:
+        respuesta = _cotizar_y_guardar(background, pedido, token, archivos, ids_subidas, db)
+    except BaseException:
+        for id_ in ids_subidas:
+            subidas.devolver(id_)
+        shutil.rmtree(UPLOADS_DIR / token, ignore_errors=True)
+        raise
+    for id_ in ids_subidas:
+        subidas.liberar(id_)
+    return respuesta
+
+
+def _cotizar_y_guardar(background, pedido, token, archivos, ids_subidas, db) -> dict:
+    """Pasos 4 a 6 de crear_pedido: cotizar, guardar y arrancar el pago."""
     # 4) Precio + triage según tipo
     if isinstance(pedido, PedidoFotocopias):
         cotizables = []
@@ -344,8 +375,8 @@ def crear_pedido(
             "terminaciones": pedido.terminaciones,
         }
 
-    # Recién ahora, con el pedido ya validado y cotizado, se mueven las
-    # subidas a la carpeta del pedido (ver _archivos_de_subidas).
+    # Recién ahora, con el pedido ya validado y cotizado, las subidas pasan
+    # a la carpeta del pedido.
     if ids_subidas:
         archivos = _tomar_subidas(token, ids_subidas)
 

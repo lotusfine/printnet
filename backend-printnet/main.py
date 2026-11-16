@@ -27,7 +27,8 @@ _BASE = (
 load_dotenv(_BASE / ".env")
 
 import subidas
-from database import init_db
+from database import get_conn, init_db
+from order_flow import marcar_despachos_interrumpidos
 from routers import admin, orders, webhooks
 from routers import subidas as subidas_router
 
@@ -53,6 +54,14 @@ async def _limpiar_subidas_cada_hora():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    # Lo que un reinicio dejó a medias (ver cada función).
+    conn = get_conn()
+    try:
+        marcar_despachos_interrumpidos(conn)
+        conn.commit()
+    finally:
+        conn.close()
+    subidas.marcar_interrumpidas()
     limpieza = asyncio.create_task(_limpiar_subidas_cada_hora())
     yield
     limpieza.cancel()

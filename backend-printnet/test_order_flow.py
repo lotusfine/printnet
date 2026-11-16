@@ -270,6 +270,80 @@ except ValueError:
     check("un pedido inexistente da error", True, True)
 conn.close()
 
+print("\n== Si el despacho revienta, no se lleva puesto el email ==")
+# Starlette corta las tareas de fondo siguientes cuando una tira excepción:
+# el despacho va antes que el email "pedido recibido", así que no puede tirar.
+
+import asyncio  # noqa: E402
+
+from fastapi import BackgroundTasks  # noqa: E402
+
+despachar_real = print_dispatch.get_dispatcher
+
+
+class DispatcherQueRevienta(print_dispatch.PrintDispatcher):
+    """Imprime el primero y revienta (excepción, no error prolijo) en el segundo."""
+
+    nombre = "revienta"
+
+    def __init__(self):
+        self.vistos = 0
+
+    def dispatch(self, printer_nombre, file_path, options):
+        self.vistos += 1
+        if self.vistos == 2:
+            raise RuntimeError("algo inesperado")
+        return print_dispatch.DispatchResult(True, f"ok: {file_path}")
+
+
+import order_flow  # noqa: E402
+
+instancia = DispatcherQueRevienta()
+order_flow.get_dispatcher = lambda: instancia
+pid = armar_pedido(["uno.pdf", "dos.pdf"])
+conn = database.get_conn()
+confirmar_pago(conn, pid)
+conn.commit(); conn.close()
+
+email_enviado = []
+tareas = BackgroundTasks()
+tareas.add_task(despachar_tras_pago, pid)
+tareas.add_task(lambda: email_enviado.append(pid))
+try:
+    asyncio.run(tareas())
+    reviento = False
+except Exception:
+    reviento = True
+order_flow.get_dispatcher = despachar_real
+row, despachos = leer(pid)
+check("la tarea de despacho no tira la excepción", reviento, False)
+check("el email sale igual", email_enviado, [pid])
+check("el pedido queda marcado para revisión", bool(row["requiere_manual"]), True)
+check("y el intento del documento que SÍ salió queda registrado", despachos, [1])
+
+
+print("\n== Después de un reinicio ==")
+
+from order_flow import marcar_despachos_interrumpidos  # noqa: E402
+
+colgado = armar_pedido(["nunca.pdf"])
+conn = database.get_conn()
+confirmar_pago(conn, colgado)  # pagado, y el proceso murió antes de imprimir
+conn.commit()
+ya_impreso = armar_pedido(["salio.pdf"])
+conn.commit(); conn.close()
+pagar(ya_impreso)
+conn = database.get_conn()
+sin_pagar = armar_pedido(["espera.pdf"])
+n = marcar_despachos_interrumpidos(conn)
+conn.commit(); conn.close()
+check("marca los pagados que nunca se imprimieron (este y el de la prueba de arriba)", n, 2)
+check("queda para revisión del operador", bool(leer(colgado)[0]["requiere_manual"]), True)
+check("y no se lo imprime solo (podría haber salido el papel)", leer(colgado)[1], [])
+check("el que ya se imprimió no se toca", bool(leer(ya_impreso)[0]["requiere_manual"]), False)
+check("el que espera el pago, tampoco", bool(leer(sin_pagar)[0]["requiere_manual"]), False)
+
+
 print()
 if fallos:
     print(f"✗ {len(fallos)} fallo(s): {', '.join(fallos)}")

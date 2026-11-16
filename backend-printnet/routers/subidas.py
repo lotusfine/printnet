@@ -35,15 +35,27 @@ def abrir_subida(datos: AbrirSubida):
 
 @router.put("/uploads/{id_}/partes/{n}")
 async def subir_parte(id_: str, n: int, request: Request):
-    # Se mira el largo declarado ANTES de leer el cuerpo: así un pedazo
-    # gigante se rechaza sin cargarlo en memoria.
+    # Primero, que la subida exista: así un id inventado no hace leer nada.
+    try:
+        await run_in_threadpool(subidas.estado, id_)
+    except subidas.ErrorSubida as e:
+        raise _http(e)
+
+    # Se lee por tramos y se corta apenas pasa del máximo. Leer el cuerpo
+    # entero (request.body()) cargaba en memoria lo que mandaran: sin
+    # Content-Length, la prueba hostil llevó el proceso de 0,5 a 2 GB con UN
+    # solo request, y la notebook es la que atiende los pedidos reales.
     largo = request.headers.get("content-length", "")
     if largo.isdigit() and int(largo) > subidas.PARTE_BYTES:
         raise HTTPException(413, "la parte es más grande de lo permitido")
-    datos = await request.body()
+    datos = bytearray()
+    async for tramo in request.stream():
+        datos += tramo
+        if len(datos) > subidas.PARTE_BYTES:
+            raise HTTPException(413, "la parte es más grande de lo permitido")
     try:
         # Escribir a disco bloquea: fuera del loop, para no frenar los demás requests.
-        await run_in_threadpool(subidas.guardar_parte, id_, n, datos)
+        await run_in_threadpool(subidas.guardar_parte, id_, n, bytes(datos))
     except subidas.ErrorSubida as e:
         raise _http(e)
     return {"ok": True}
@@ -66,5 +78,19 @@ def completar_subida(id_: str, background: BackgroundTasks):
 def estado_subida(id_: str):
     try:
         return subidas.estado(id_)
+    except subidas.ErrorSubida as e:
+        raise _http(e)
+
+
+@router.delete("/uploads/{id_}", status_code=204)
+def eliminar_subida(id_: str):
+    """La web la llama al quitar un documento o al volver a subirlo.
+
+    Sin esto, lo que el cliente descartaba quedaba ocupando el tope de disco
+    hasta la limpieza, y unas cuantas subidas grandes descartadas alcanzaban
+    para rechazar a todos los demás clientes.
+    """
+    try:
+        subidas.eliminar(id_)
     except subidas.ErrorSubida as e:
         raise _http(e)

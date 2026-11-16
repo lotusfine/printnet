@@ -15,6 +15,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 os.environ["PRINTNET_DB"] = os.path.join(tempfile.mkdtemp(), "pedidos.db")
@@ -22,6 +23,7 @@ os.environ["PRINTNET_UPLOADS"] = tempfile.mkdtemp()
 os.environ.pop("MP_ACCESS_TOKEN", None)
 
 import database  # noqa: E402
+import payments  # noqa: E402
 import subidas  # noqa: E402
 from fastapi import BackgroundTasks, HTTPException  # noqa: E402
 from generar_pdf_prueba import generar  # noqa: E402
@@ -145,6 +147,98 @@ subidas.MAX_PEDIDO_BYTES = tope
 
 check("sin archivos ni subidas, un pedido de fotocopias → 422",
       status(pedir(datos(1))), 422)
+
+
+
+
+def en_paralelo(funcion, veces: int) -> list:
+    resultados = [None] * veces
+    largada = threading.Barrier(veces)
+
+    def correr(i):
+        largada.wait()
+        resultados[i] = funcion(i)
+
+    hilos = [threading.Thread(target=correr, args=(i,)) for i in range(veces)]
+    for h in hilos:
+        h.start()
+    for h in hilos:
+        h.join()
+    return resultados
+
+
+def carpetas_de_pedidos() -> set[str]:
+    return {p.name for p in database.UPLOADS_DIR.iterdir() if p.name != "_subidas"}
+
+
+print("\n== MercadoPago caído: el cliente NO pierde lo que subió ==")
+
+modo_real, crear_real = payments.modo_mercadopago, payments.crear_preferencia
+payments.modo_mercadopago = lambda: True
+
+
+def mp_caido(**kw):
+    raise RuntimeError("MercadoPago no responde")
+
+
+payments.crear_preferencia = mp_caido
+g = subida_lista(3)
+antes = carpetas_de_pedidos()
+r = pedir(datos(1), uploads=json.dumps([g]))
+check("el pago no arranca → 502", status(r), 502)
+check("la subida sigue lista para reintentar", subidas.estado(g)["estado"], "listo")
+check("no queda una carpeta de pedido huérfana", carpetas_de_pedidos(), antes)
+
+payments.crear_preferencia = lambda **kw: {"preference_id": "pref-1", "init_point": "https://mp/ok"}
+r = pedir(datos(1), uploads=json.dumps([g]))
+check("reintentando con MercadoPago de vuelta, se crea", status(r), 201)
+check("y va al pago", r["init_point"], "https://mp/ok")
+check("recién ahí la subida se libera", subidas.SUBIDAS_DIR.joinpath(g).exists(), False)
+payments.modo_mercadopago, payments.crear_preferencia = modo_real, crear_real
+
+
+print("\n== Doble clic en pagar (la prueba hostil) ==")
+
+a, b = subida_lista(2, "a.pdf"), subida_lista(2, "b.pdf")
+r = en_paralelo(lambda i: status(pedir(datos(2), uploads=json.dumps([a, b]))), 6)
+check("de 6 pedidos iguales a la vez, se crea uno", r.count(201), 1)
+check("los demás reciben 409, ninguno 500", sorted(set(r) - {201}), [409])
+
+
+print("\n== Dos pedidos cruzados con las mismas subidas ==")
+
+c, d = subida_lista(2, "c.pdf"), subida_lista(2, "d.pdf")
+orden = [[c, d], [d, c]]
+r = en_paralelo(lambda i: status(pedir(datos(2), uploads=json.dumps(orden[i]))), 2)
+check("como mucho uno se crea, y ninguno da 500", 500 in r, False)
+if 201 not in r:
+    check("si chocaron los dos, las subidas siguen sirviendo",
+          (subidas.estado(c)["estado"], subidas.estado(d)["estado"]), ("listo", "listo"))
+    check("y un pedido después anda", status(pedir(datos(2), uploads=json.dumps([c, d]))), 201)
+
+
+print("\n== Una subida que quedó en error ==")
+
+import document_convert  # noqa: E402
+
+convertir_real = document_convert.convertir_a_pdf
+document_convert.convertir_a_pdf = lambda o, c: document_convert.ConversionResult(
+    ok=False, pdf_path=None, detalle="El documento está dañado.", del_documento=True)
+w = subidas.abrir("roto.docx", 1500, "")["id"]
+subidas.guardar_parte(w, 0, b"z" * 1000)
+subidas.guardar_parte(w, 1, b"z" * 500)
+subidas.completar(w)
+subidas.preparar(w)
+document_convert.convertir_a_pdf = convertir_real
+r = pedir(datos(1), uploads=json.dumps([w]))
+check("da 422, no 'todavía no terminó'", status(r), 422)
+check("con el error de verdad", "dañado" in str(r.detail), True)
+
+
+print("\n== uploads vacío junto con files ==")
+
+r = pedir(datos(1), uploads="[]", files=[])
+check("'[]' no cuenta como mandar las dos cosas", "no los dos" in str(getattr(r, "detail", "")), False)
 
 
 print()
