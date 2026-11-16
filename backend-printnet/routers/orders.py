@@ -23,6 +23,7 @@ import document_convert
 import notifications
 import payments
 import pricing
+import subidas
 from database import UPLOADS_DIR, get_db
 from models import Pedido, PedidoFotocopias, PedidoFotos
 from order_flow import confirmar_pago, despachar_tras_pago
@@ -32,29 +33,25 @@ router = APIRouter()
 
 _pedido_adapter = TypeAdapter(Pedido)
 
-# ESPEJADO EN frontend/src/limites.js (MAX_ARCHIVO_MB). Si se cambia acá hay
-# que cambiarlo allá, o la web deja subir algo que después se rechaza.
+# Límite del camino VIEJO: archivos mandados enteros en POST /orders y
+# POST /orders/paginas. 95 y no 100 porque Cloudflare, en el plan gratuito,
+# corta las peticiones de más de 100 MB; dejando el límite propio un poco
+# abajo, el cliente recibe nuestro mensaje y no uno de Cloudflare.
 #
-# 95 y no 100 porque Cloudflare, en el plan gratuito, corta las peticiones de
-# más de 100 MB. Dejando el límite propio un poco abajo, el cliente recibe
-# nuestro mensaje y no un error de Cloudflare que no podemos redactar.
+# La web nueva ya no usa este camino: sube en partes (subidas.py, hasta
+# subidas.MAX_PEDIDO_MB). Este queda para la web vieja durante el deploy y
+# para /fotos.
 MAX_FILE_MB = 95
 MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024
 
 IMAGEN_CT = re.compile(r"^image/")
 
-_MENSAJE_FORMATO = (
-    "No aceptamos ese formato. Podés subir un PDF, o un documento de Word, "
-    "Excel, PowerPoint u OpenOffice — esos los convertimos a PDF nosotros."
-)
-
-# Cuando la conversión falla por un problema NUESTRO (LibreOffice caído, un
-# timeout), el cliente no puede hacer nada con el detalle técnico — y ese
-# detalle incluye rutas internas del servidor. Va al registro, no a la pantalla.
-_MENSAJE_CONVERSION_FALLIDA = (
-    "No pudimos procesar tu documento. Probá subiéndolo en PDF, o escribinos "
-    "y lo resolvemos."
-)
+# Compartidos con la subida en partes: viven en subidas.py para que los dos
+# caminos le digan lo mismo al cliente.
+_MENSAJE_FORMATO = subidas.MENSAJE_FORMATO
+_MENSAJE_CONVERSION_FALLIDA = subidas.MENSAJE_CONVERSION_FALLIDA
+_nombre_seguro = subidas.nombre_seguro
+_contar_paginas_pdf = subidas.contar_paginas_pdf
 
 
 def _fallo_conversion(resultado) -> HTTPException:
@@ -63,20 +60,6 @@ def _fallo_conversion(resultado) -> HTTPException:
         return HTTPException(422, resultado.detalle)
     logger.error("Conversión fallida (problema del sistema): %s", resultado.detalle)
     return HTTPException(422, _MENSAJE_CONVERSION_FALLIDA)
-
-
-def _nombre_seguro(nombre: str) -> str:
-    base = Path(nombre).name
-    return re.sub(r"[^\w.\- ]", "_", base) or "archivo"
-
-
-def _contar_paginas_pdf(path: Path) -> int | None:
-    try:
-        from pypdf import PdfReader
-
-        return len(PdfReader(str(path)).pages)
-    except Exception:
-        return None
 
 
 def _es_pdf(f: UploadFile) -> bool:
@@ -148,6 +131,59 @@ def _upsert_customer(db: sqlite3.Connection, contacto) -> int:
     return cur.lastrowid
 
 
+def _leer_ids_subidas(crudo: str, cantidad: int) -> list[str]:
+    try:
+        ids = json.loads(crudo)
+    except json.JSONDecodeError:
+        raise HTTPException(422, "el campo 'uploads' no es JSON válido")
+    if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+        raise HTTPException(422, "'uploads' tiene que ser una lista de ids")
+    if len(ids) != cantidad:
+        raise HTTPException(
+            422,
+            f"llegaron {len(ids)} subida(s) y {cantidad} configuración(es): "
+            f"tiene que haber una por documento",
+        )
+    if len(set(ids)) != len(ids):
+        raise HTTPException(422, "la misma subida aparece dos veces")
+    return ids
+
+
+def _archivos_de_subidas(ids: list[str]) -> list[dict]:
+    """Lo que hace falta para cotizar, SIN mover nada todavía.
+
+    Si el pedido se rechaza después (un rango de páginas que no existe), el
+    cliente no pierde lo que subió: con 300 MB, perderlo es volver a esperar
+    la subida entera. Los archivos se mueven recién en `_tomar_subidas`.
+    """
+    archivos = []
+    for id_ in ids:
+        try:
+            e = subidas.estado(id_)
+        except subidas.ErrorSubida as err:
+            raise HTTPException(err.status, err.mensaje)
+        if e["estado"] != "listo":
+            raise HTTPException(409, f"'{e['nombre']}' todavía no terminó de prepararse")
+        archivos.append({
+            "filename_original": e["nombre"],
+            "paginas": e["paginas"],
+            "size_bytes": e["tamano_bytes"],
+        })
+    if sum(a["size_bytes"] for a in archivos) > subidas.MAX_PEDIDO_BYTES:
+        raise HTTPException(
+            413, f"el pedido supera el máximo de {subidas.MAX_PEDIDO_MB} MB en total")
+    return archivos
+
+
+def _tomar_subidas(token: str, ids: list[str]) -> list[dict]:
+    destino = UPLOADS_DIR / token
+    usados: set[str] = set()
+    try:
+        return [subidas.tomar(id_, destino, usados) for id_ in ids]
+    except subidas.ErrorSubida as e:
+        raise HTTPException(e.status, e.mensaje)
+
+
 @router.post("/orders/paginas")
 def contar_paginas(file: UploadFile = File(...)):
     """Cuenta las páginas de un PDF SIN crear pedido.
@@ -185,7 +221,9 @@ def contar_paginas(file: UploadFile = File(...)):
 def crear_pedido(
     background: BackgroundTasks,
     datos: str = Form(..., description="JSON del pedido (ver SPEC.md)"),
-    files: list[UploadFile] = File(...),
+    files: list[UploadFile] | None = File(None),
+    uploads: str | None = Form(
+        None, description="JSON: ids de subidas en partes, uno por documento"),
     db: sqlite3.Connection = Depends(get_db),
 ):
     # 1) Validar el payload JSON contra el contrato
@@ -200,30 +238,43 @@ def crear_pedido(
         ]
         raise HTTPException(422, errores)
 
-    # 2) Validar archivos según el tipo de pedido
-    if isinstance(pedido, PedidoFotocopias):
-        # Un archivo por documento: cada uno trae su propia configuración y el
-        # emparejamiento es por posición.
-        if len(files) != len(pedido.documentos):
-            raise HTTPException(
-                422,
-                f"llegaron {len(files)} archivo(s) y {len(pedido.documentos)} "
-                f"configuración(es): tiene que haber una por documento",
-            )
-        for f in files:
-            nombre = f.filename or "archivo"
-            if not (_es_pdf(f) or document_convert.necesita_conversion(nombre)):
-                raise HTTPException(422, f"'{nombre}': {_MENSAJE_FORMATO}")
-    else:  # PedidoFotos
-        if not files:
-            raise HTTPException(422, "un pedido de fotos lleva al menos 1 archivo")
-        for f in files:
-            if not (_es_pdf(f) or _es_imagen(f)):
-                raise HTTPException(422, f"'{f.filename}': solo se aceptan imágenes o PDF")
+    if files and uploads:
+        raise HTTPException(422, "mandá 'files' o 'uploads', no los dos")
 
-    # 3) Guardar archivos y contar páginas reales
     token = str(uuid.uuid4())
-    archivos = _guardar_archivos(token, files)
+    ids_subidas = None
+
+    if uploads:
+        # 2+3) Camino nuevo: los archivos ya están en el servidor, preparados.
+        if not isinstance(pedido, PedidoFotocopias):
+            raise HTTPException(422, "la subida en partes es solo para fotocopias")
+        ids_subidas = _leer_ids_subidas(uploads, len(pedido.documentos))
+        archivos = _archivos_de_subidas(ids_subidas)
+    else:
+        files = files or []
+        # 2) Validar archivos según el tipo de pedido
+        if isinstance(pedido, PedidoFotocopias):
+            # Un archivo por documento: cada uno trae su propia configuración y el
+            # emparejamiento es por posición.
+            if len(files) != len(pedido.documentos):
+                raise HTTPException(
+                    422,
+                    f"llegaron {len(files)} archivo(s) y {len(pedido.documentos)} "
+                    f"configuración(es): tiene que haber una por documento",
+                )
+            for f in files:
+                nombre = f.filename or "archivo"
+                if not (_es_pdf(f) or document_convert.necesita_conversion(nombre)):
+                    raise HTTPException(422, f"'{nombre}': {_MENSAJE_FORMATO}")
+        else:  # PedidoFotos
+            if not files:
+                raise HTTPException(422, "un pedido de fotos lleva al menos 1 archivo")
+            for f in files:
+                if not (_es_pdf(f) or _es_imagen(f)):
+                    raise HTTPException(422, f"'{f.filename}': solo se aceptan imágenes o PDF")
+
+        # 3) Guardar archivos y contar páginas reales
+        archivos = _guardar_archivos(token, files)
 
     # 4) Precio + triage según tipo
     if isinstance(pedido, PedidoFotocopias):
@@ -292,6 +343,11 @@ def crear_pedido(
             "gramaje": pedido.gramaje,
             "terminaciones": pedido.terminaciones,
         }
+
+    # Recién ahora, con el pedido ya validado y cotizado, se mueven las
+    # subidas a la carpeta del pedido (ver _archivos_de_subidas).
+    if ids_subidas:
+        archivos = _tomar_subidas(token, ids_subidas)
 
     # 5) Persistir cliente + pedido + archivos. El pedido nace SIN pagar,
     #    en 'pendiente_pago'; el pago define el paso 6.
