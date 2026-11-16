@@ -4,7 +4,7 @@ import ContactForm, { validateContacto, composeTelefono, DEFAULT_CONTACTO } from
 import FileUpload from '../components/fotocopias/FileUpload';
 import PrintOptions from '../components/fotocopias/PrintOptions';
 import OrderSummary from '../components/fotocopias/OrderSummary';
-import { crearPedidoConSubidas } from '../api';
+import { crearPedidoConSubidas, descartarSubida, estadoSubida } from '../api';
 import { PEDIDOS_HABILITADOS } from '../config';
 import { paginasDelRango } from '../precio';
 import PedidosDeshabilitados from '../components/PedidosDeshabilitados';
@@ -32,6 +32,21 @@ const paraCotizar = (doc) => {
 
 let proximoId = 1;
 
+/** Los documentos cuya subida ya no se puede usar en un pedido, con el porqué. */
+const subidasQueNoSirven = async (docs) => {
+  const revisados = await Promise.all(docs.map(async (doc) => {
+    try {
+      const est = await estadoSubida(doc.uploadId);
+      if (!est) return { doc, mensaje: 'Pasó mucho tiempo y se venció la subida. Tocá "Reintentar".' };
+      if (est.estado === 'error') return { doc, mensaje: est.error };
+      return null;
+    } catch {
+      return null;  // sin conexión: no es culpa del documento
+    }
+  }));
+  return revisados.filter(Boolean);
+};
+
 const Fotocopias = () => {
   const [docs, setDocs] = useState([]);
   const [seleccionado, setSeleccionado] = useState(null);
@@ -55,7 +70,7 @@ const Fotocopias = () => {
       paginas: null,
       convertido: false,
       estado: 'subiendo',
-      progreso: { enviado: 0, total: f.size },
+      progreso: null,  // null = todavía en la fila, esperando su turno
       uploadId: null,
       // Para cortar la subida si el cliente quita el documento a la mitad:
       // con 300 MB, seguir subiendo algo que nadie va a usar es tiempo y disco.
@@ -71,7 +86,9 @@ const Fotocopias = () => {
   };
 
   const quitarDoc = (id) => {
-    docs.find((d) => d.id === id)?.cancelar?.abort();
+    const quitado = docs.find((d) => d.id === id);
+    quitado?.cancelar?.abort();
+    descartarSubida(quitado?.uploadId);
     setDocs((prev) => {
       const restantes = prev.filter((d) => d.id !== id);
       setSeleccionado((sel) => (sel === id ? restantes[0]?.id ?? null : sel));
@@ -150,6 +167,20 @@ const Fotocopias = () => {
       }
       setEnvio({ estado: 'exito', pedido });
     } catch (e) {
+      // 404/409/422 al crear el pedido suelen ser subidas que ya no sirven:
+      // vencidas (24 h con la pestaña abierta) o perdidas en un reinicio. Se
+      // marcan esos documentos para que el cliente los vuelva a subir con
+      // "Reintentar", en vez de un error sin salida.
+      const vencidos = [404, 409, 422].includes(e?.status) ? await subidasQueNoSirven(docs) : [];
+      if (vencidos.length) {
+        vencidos.forEach(({ doc, mensaje }) =>
+          actualizarDoc(doc.id, { estado: 'error', error: { mensaje, detalle: '' } }));
+        setEnvio({
+          estado: 'error',
+          mensaje: `Volvé a subir ${vencidos.map(({ doc }) => `"${doc.name}"`).join(', ')} para continuar.`,
+        });
+        return;
+      }
       setEnvio({ estado: 'error', mensaje: e.message });
     }
   };

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { subirArchivo } from '../../api';
+import { descartarSubida, subirArchivo } from '../../api';
 import { MAX_ARCHIVO_BYTES, MAX_ARCHIVO_MB, formatearTamano } from '../../limites';
 import { ACCEPT, describirExtension, esAceptado, esConvertible } from '../../formatos';
 
@@ -26,16 +26,22 @@ export const validateRango = (valor) => {
 };
 
 const explicarError = (e) => {
+  if (e?.paraCliente) return { mensaje: e.message, detalle: '' };
   if (e?.status === 413) return { mensaje: `Supera el máximo de ${MAX_ARCHIVO_MB} MB.`, detalle: '' };
   // 503: el servidor está lleno de subidas en curso; el mensaje ya lo explica.
   if (e?.status === 503) return { mensaje: e.message, detalle: '' };
+  // 404/409 a mitad de camino: la subida se venció o se cortó del lado del
+  // servidor (por ejemplo, un reinicio). Lo único que sirve es subirlo de nuevo.
+  if (e?.status === 404 || e?.status === 409) {
+    return { mensaje: 'Se interrumpió la subida. Tocá "Reintentar" para subirlo de nuevo.', detalle: '' };
+  }
   if (e?.status === 422) {
     return { mensaje: e?.message || 'No pudimos leer este documento.', detalle: '' };
   }
   // Sin código HTTP = no hubo respuesta: conexión, bloqueo del navegador, o el
   // servidor caído. Se guarda el detalle técnico para poder diagnosticar.
   return {
-    mensaje: 'No pudimos conectarnos para leer el documento.',
+    mensaje: 'No pudimos conectarnos para subir el documento.',
     detalle: e?.message || 'sin detalle',
   };
 };
@@ -44,6 +50,11 @@ const FileUpload = ({ documentos, seleccionado, onSeleccionar, onAgregar, onActu
   const [dragging, setDragging] = useState(false);
   const [avisoCarga, setAvisoCarga] = useState(null);
   const inputRef = useRef(null);
+  // Las subidas van de a una, en fila: todas a la vez no terminan antes (el
+  // límite es la conexión) y con una conexión mala agotaban los reintentos
+  // juntas. Cada procesar() atrapa sus errores, así la fila nunca se corta.
+  const fila = useRef(Promise.resolve());
+  const encolar = (doc) => { fila.current = fila.current.then(() => procesar(doc)); };
 
   const pesoTotal = documentos.reduce((s, d) => s + (d.file?.size || 0), 0);
 
@@ -51,6 +62,7 @@ const FileUpload = ({ documentos, seleccionado, onSeleccionar, onAgregar, onActu
     try {
       const { id, paginas, convertido } = await subirArchivo(doc.file, {
         signal: doc.cancelar.signal,
+        alAbrir: (uploadId) => onActualizar(doc.id, { uploadId }),
         alProgresar: (p) => onActualizar(doc.id, p.fase === 'preparando'
           ? { estado: 'contando', progreso: null }
           : { estado: 'subiendo', progreso: p }),
@@ -94,7 +106,7 @@ const FileUpload = ({ documentos, seleccionado, onSeleccionar, onAgregar, onActu
     }
 
     setAvisoCarga(rechazos.length ? rechazos : null);
-    if (aceptados.length) onAgregar(aceptados).forEach(procesar);
+    if (aceptados.length) onAgregar(aceptados).forEach(encolar);
   };
 
   const usadoMB = Math.round(pesoTotal / (1024 * 1024));
@@ -161,7 +173,13 @@ const FileUpload = ({ documentos, seleccionado, onSeleccionar, onAgregar, onActu
             activo={doc.id === seleccionado}
             onSeleccionar={() => onSeleccionar(doc.id)}
             onQuitar={() => onQuitar(doc.id)}
-            onReintentar={() => { onActualizar(doc.id, { estado: 'subiendo', error: null, progreso: { enviado: 0, total: doc.file.size } }); procesar(doc); }}
+            onReintentar={() => {
+              // Lo que se había subido de este documento ya no sirve: que el
+              // servidor lo libere ahora y no ocupe disco hasta la limpieza.
+              descartarSubida(doc.uploadId);
+              onActualizar(doc.id, { estado: 'subiendo', error: null, progreso: null, uploadId: null });
+              encolar(doc);
+            }}
           />
         ))}
       </div>
@@ -207,7 +225,9 @@ const DocumentoFila = ({ doc, activo, onSeleccionar, onQuitar, onReintentar }) =
           <p className="text-sm font-bold text-stone-700 truncate">{doc.name}</p>
           <p className={`text-xs ${roto ? 'text-red-600' : 'text-stone-400'}`}>
             {doc.estado === 'subiendo'
-              ? `Subiendo… ${formatearTamano(doc.progreso?.enviado || 0)} de ${formatearTamano(doc.progreso?.total || doc.file.size)}`
+              ? (doc.progreso
+                ? `Subiendo… ${formatearTamano(doc.progreso.enviado)} de ${formatearTamano(doc.progreso.total)}`
+                : 'En espera…')
               : doc.estado === 'contando'
                 ? (esConvertible(doc.name) ? 'Convirtiendo a PDF…' : 'Preparando tu documento…')
                 : roto
@@ -215,7 +235,7 @@ const DocumentoFila = ({ doc, activo, onSeleccionar, onQuitar, onReintentar }) =
                   : `${doc.paginas} ${doc.paginas === 1 ? 'página' : 'páginas'}${doc.convertido ? ' · convertido a PDF' : ''}`}
           </p>
 
-          {doc.estado === 'subiendo' && (
+          {doc.estado === 'subiendo' && doc.progreso && (
             <div className="mt-1.5 h-1.5 w-full rounded-full bg-stone-200 overflow-hidden">
               <div
                 className="h-full bg-amber-500 transition-all duration-300"

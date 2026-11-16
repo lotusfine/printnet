@@ -58,12 +58,18 @@ const ESPERAS_REINTENTO_MS = [1000, 2000, 4000, 8000, 15000];
 const CADA_CUANTO_PREGUNTAR_MS = 2000;
 const MAXIMO_PREPARANDO_MS = 10 * 60 * 1000;
 
+const cancelado = () => new DOMException('cancelado', 'AbortError');
+
 const dormir = (ms, signal) =>
   new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(cancelado());
+      return;
+    }
     const t = setTimeout(resolve, ms);
     signal?.addEventListener('abort', () => {
       clearTimeout(t);
-      reject(new DOMException('cancelado', 'AbortError'));
+      reject(cancelado());
     }, { once: true });
   });
 
@@ -83,11 +89,21 @@ const conReintentos = async (intento, signal) => {
   }
 };
 
+// Un error cuyo mensaje ya está escrito para el cliente (no "Failed to fetch").
+const errorParaCliente = (mensaje, status) => {
+  const error = new Error(mensaje);
+  error.status = status;
+  error.paraCliente = true;
+  return error;
+};
+
 /**
  * Sube un archivo en partes y espera a que el servidor lo prepare.
  * Devuelve { id, paginas, convertido }; el id es lo que va en el pedido.
+ * `alAbrir(id)` avisa el id apenas existe, para poder borrar la subida si el
+ * cliente quita el documento a la mitad.
  */
-export async function subirArchivo(file, { alProgresar, signal } = {}) {
+export async function subirArchivo(file, { alProgresar, alAbrir, signal } = {}) {
   const { id, parte_bytes: parteBytes, partes } = await conReintentos(async () =>
     parse(await fetch(`${PRINTNET_API}/uploads`, {
       method: 'POST',
@@ -95,6 +111,8 @@ export async function subirArchivo(file, { alProgresar, signal } = {}) {
       body: JSON.stringify({ nombre: file.name, tamano_bytes: file.size, content_type: file.type || '' }),
       signal,
     })), signal);
+  alAbrir?.(id);
+  alProgresar?.({ fase: 'subiendo', enviado: 0, total: file.size });
 
   // Un pedazo a la vez: en paralelo no acelera cuando el cuello de botella es
   // la conexión del cliente o la del local, y complica los reintentos.
@@ -123,14 +141,30 @@ export async function subirArchivo(file, { alProgresar, signal } = {}) {
       parse(await fetch(`${PRINTNET_API}/uploads/${id}`, { signal })), signal);
     if (est.estado === 'listo') return { id, paginas: est.paginas, convertido: est.convertido };
     if (est.estado === 'error') {
-      const error = new Error(est.error || 'No pudimos procesar tu documento.');
-      error.status = 422;
-      throw error;
+      throw errorParaCliente(est.error || 'No pudimos procesar tu documento.', 422);
     }
     if (Date.now() > limite) {
-      throw new Error('Tu documento está tardando demasiado en prepararse. Probá de nuevo o escribinos.');
+      throw errorParaCliente(
+        'Tu documento está tardando demasiado en prepararse. Probá de nuevo o escribinos.', 408);
     }
   }
+}
+
+/** Estado de una subida: { estado, ... }, o null si ya no existe (venció). */
+export async function estadoSubida(id) {
+  const res = await fetch(`${PRINTNET_API}/uploads/${id}`);
+  if (res.status === 404) return null;
+  return parse(res);
+}
+
+/**
+ * Le avisa al servidor que una subida ya no se va a usar, para que libere el
+ * disco en el momento. Sin esperar respuesta ni fallar: si no llega, la
+ * limpieza del servidor la borra igual más tarde.
+ */
+export function descartarSubida(id) {
+  if (!id) return;
+  fetch(`${PRINTNET_API}/uploads/${id}`, { method: 'DELETE' }).catch(() => {});
 }
 
 /** Estado público de un pedido por token. */
