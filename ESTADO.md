@@ -5,7 +5,10 @@
 > técnico del backend está en `backend-printnet/SPEC.md`; el de la instalación
 > en Windows, en `backend-printnet/deploy/README.md`.
 >
-> Última actualización: **2026-08-25**
+> Última actualización: **2026-11-16**
+>
+> **El sistema está en producción y corriendo solo.** Backend y túnel son
+> servicios de Windows que arrancan con la notebook. Ver el punto 4.
 
 ---
 
@@ -31,7 +34,7 @@ Tres piezas separadas, cada una en su lugar:
 | Pieza | Qué es | Dónde vive |
 |---|---|---|
 | **Web** | React compilado a archivos estáticos | cPanel (servidoraweb, `167.250.5.3`) |
-| **Backend** | FastAPI + SQLite | Hoy: Mac de desarrollo · Destino: notebook Windows |
+| **Backend** | FastAPI + SQLite, compilado a `.exe` | Notebook Windows del local, como servicio (`C:\PrintNet\servicio`) |
 | **Impresora** | Ricoh IM C4500 (color, A3, dúplex) | Local |
 
 El hosting **no puede correr Python** (lo verifiqué: no tiene "Setup Python
@@ -100,17 +103,18 @@ sin token como con uno inventado.
 |---|---|
 | Nombre del túnel | `printnet` |
 | ID | `b34cbdf0-01d6-47e6-b73d-2c5851b9e37f` |
-| Credenciales | `C:\Users\marcelo\.cloudflared\b34cbdf0-...json` |
-| Configuración | `C:\Users\marcelo\.cloudflared\config.yml` |
+| Credenciales | `C:\PrintNet\servicio\cloudflared\b34cbdf0-...json` |
+| Configuración | `C:\PrintNet\servicio\cloudflared\config.yml` |
+| Certificado de origen | `C:\PrintNet\servicio\cloudflared\cert.pem` |
 | Usuario de Windows | **marcelo** |
 
-Se levanta a mano con `cloudflared tunnel run printnet`, en su propia ventana.
-Convertirlo en servicio es parte del punto 4.
-
-**Trampa para cuando sea servicio:** las credenciales y el `cert.pem` viven en
-la carpeta personal de `marcelo`. El servicio corre bajo otra cuenta que no la
-ve — hay que pasarle `--config` y `TUNNEL_ORIGIN_CERT`. `deploy/install-services.ps1`
-ya lo contempla.
+Corre como el servicio `PrintNetTunnel` (ver punto 4). Los archivos de arriba
+se copiaron desde `C:\Users\marcelo\.cloudflared\` a la carpeta del servicio a
+propósito: **el servicio corre como LocalSystem, cuyo `%USERPROFILE%` es
+`C:\Windows\System32\config\systemprofile`, no la carpeta de `marcelo`.** Por
+eso `install-services.ps1` le pasa `--config` con ruta absoluta y la variable
+`TUNNEL_ORIGIN_CERT`. Si en el futuro se regeneran las credenciales, hay que
+copiarlas de nuevo a la carpeta del servicio, no solo a la del usuario.
 
 **Pendiente menor:** `/docs` y `/openapi.json` quedaron públicos. No filtran
 datos, pero publican la lista completa de endpoints, incluidos los de admin.
@@ -189,22 +193,74 @@ responde — si ves "HP LaserJet 1", el backend no contestó.
 **El token no va en `config.js`:** ese archivo lo sirve la web y lo puede leer
 cualquiera.
 
-### 4. Compilar el `.exe` e instalarlo como servicio — ⬅️ ES LO ÚNICO QUE FALTA
+**No hay usuarios ni cuentas: el token *es* la contraseña, una sola para todo
+el sistema.** El backend no registra quién entra ni desde dónde. Consecuencias
+prácticas:
 
-> Hoy el backend y el túnel corren en dos ventanas de PowerShell abiertas a
-> mano. **El sitio está tomando pedidos reales en ese estado.** Si alguien
-> cierra una ventana, o la notebook se reinicia o se suspende, el formulario
-> deja de funcionar. No se pierde plata (sin backend no se crea ni se cobra el
-> pedido), pero el cliente se topa con algo roto.
+- **Agregar una computadora no requiere tocar el servidor.** Se entra al panel
+  desde esa máquina y se pega el mismo token.
+- Queda guardado en el `localStorage` **de ese navegador en esa máquina**. Misma
+  PC con otro navegador = lo vuelve a pedir.
+- Una máquina que deja el local tiene que salir con **Cerrar sesión**, o el
+  token se va guardado adentro.
+- **Para rotarlo:** cambiar `PRINTNET_ADMIN_TOKEN` en
+  `C:\PrintNet\servicio\.env` y `Restart-Service PrintNetBackend` (como
+  administrador). Eso invalida todas las sesiones y hay que volver a pegarlo en
+  cada máquina.
 
+Hoy entran las **dos computadoras fijas de la librería**.
 
-Todo preparado en `backend-printnet/deploy/` (spec de PyInstaller, scripts NSSM,
-instalador Inno Setup). PyInstaller **no cross-compila**: hay que hacerlo en la
-notebook Windows.
+### 4. Compilar el `.exe` e instalarlo como servicio — ✅ hecho (2026-11-16)
 
-**Orden importante:** primero correr el backend con Python suelto y probar la
-impresión; recién cuando funcione, compilar. Depurar un `.exe` es mucho más
-lento.
+El backend y el túnel ya **no** dependen de ventanas abiertas a mano. Son dos
+servicios de Windows con arranque automático y reinicio ante caída:
+
+| Servicio | Qué corre | Logs |
+|---|---|---|
+| `PrintNetBackend` | `C:\PrintNet\servicio\printnet-backend.exe` | `C:\PrintNet\servicio\logs\backend.log` |
+| `PrintNetTunnel` | `cloudflared --config ... tunnel run printnet` | `C:\PrintNet\servicio\logs\tunnel.log` |
+
+Registrados con NSSM por `deploy/install-services.ps1`, que se corre desde una
+PowerShell **como administrador**:
+
+```
+powershell -ExecutionPolicy Bypass -File C:\PrintNet\printnet\backend-printnet\deploy\install-services.ps1 -InstallDir C:\PrintNet\servicio
+```
+
+**Verificado después de reiniciar la notebook**: los dos servicios levantaron
+solos, sin abrir nada, y desde internet `https://api.libreriaglaxara.com.ar/`
+devolvió 200 y `/admin/orders` devolvió 401.
+
+**Por qué la carpeta del servicio NO es `dist\`.** El ejecutable crea
+`printnet.db` y `uploads\` al lado suyo. Si el servicio corriera desde `dist`,
+el día que se recompile con `--noconfirm` se estaría tocando la carpeta donde
+viven los pedidos reales. Por eso el servicio vive en `C:\PrintNet\servicio\`,
+que es una copia: `printnet-backend.exe`, `.env`, `nssm.exe` y `cloudflared\`.
+
+**Qué hay que recordar al actualizar el backend:** recompilar en `dist`, parar
+el servicio, copiar el `.exe` nuevo a `C:\PrintNet\servicio\` y arrancarlo. La
+base y los archivos de los clientes quedan donde están.
+
+```
+Stop-Service PrintNetBackend
+Copy-Item C:\PrintNet\printnet\backend-printnet\dist\printnet-backend.exe C:\PrintNet\servicio\ -Force
+Start-Service PrintNetBackend
+```
+
+**`AppDirectory` es crítico** y `install-services.ps1` lo setea: el `.exe`
+resuelve `.env`, `printnet.db` y `uploads\` relativos a su carpeta de trabajo.
+Si estuviera mal, el backend arrancaría igual pero **sin MercadoPago y sin
+token de admin**, y no nos enteraríamos hasta que un cliente intentara pagar.
+La forma rápida de descartarlo: `/admin/orders` tiene que dar **401**, no 503.
+Un 503 significa que no leyó el `.env`.
+
+La base arrancó limpia: los pedidos de prueba de agosto quedaron en la base
+vieja de `dist\`, que sigue ahí por si alguna vez hace falta mirarla. Cuando el
+`.exe` no encuentra `printnet.db` la crea y da de alta la Ricoh como impresora
+activa solo (`database.py`, `SEED_PRINTERS`), así que no hubo que cargar nada
+a mano.
+
+PyInstaller **no cross-compila**: la compilación se hace en la notebook Windows.
 
 ### 5. Activar los pedidos en la web — ✅ hecho (2026-08-19)
 
@@ -294,6 +350,28 @@ quien administre la red del local.
 través del proxy de Cloudflare. Si alguien pone la raíz o `mail` en naranja,
 se rompe el correo.
 
+**Windows PowerShell 5.1 no soporta here-strings en archivos con finales de
+línea de Unix.** Y no falla con un mensaje claro: empieza a interpretar el
+texto del mensaje como código y tira una catarata de errores de sintaxis que
+apuntan a líneas que son texto plano. Esto frenó la instalación del servicio.
+Dos reglas, ya aplicadas:
+- En los `.ps1`, para texto de varias líneas van varios `Write-Host`, nunca
+  here-strings.
+- `.gitattributes` fuerza CRLF en `.ps1`, `.bat`, `.cmd` e `.iss`, y los
+  scripts se guardan en **UTF-8 con BOM** — sin BOM, 5.1 los lee como ANSI y
+  "túnel" imprime "tÃºnel".
+
+**No hay que hacer clic adentro de una consola de Windows que esté corriendo
+algo.** El modo QuickEdit congela el proceso hasta que se presione una tecla, y
+desde afuera se ve exactamente como un backend colgado: acepta la conexión TCP
+y no responde nunca. Ya nos costó un rato de diagnóstico. Desde que son
+servicios no aplica, pero sí a cualquier prueba manual.
+
+**Hay dos `.env` y manda el de la carpeta desde donde se arranca.** Uno en
+`backend-printnet\` (Python suelto), uno en `dist\` (el `.exe` recién
+compilado) y uno en `C:\PrintNet\servicio\` (**el de producción**). Editar el
+equivocado es silencioso.
+
 ---
 
 ## Accesos y credenciales
@@ -317,25 +395,57 @@ en el hosting, fuera de la carpeta pública.
 
 ## Próximo paso recomendado
 
+La puesta en producción está **terminada**. Todo lo que sigue es mejora, no
+bloqueante:
+
 1. ~~Clonar el repo en la notebook~~ ✅
 2. ~~Probar la impresión real~~ ✅ (2026-08-14)
 3. ~~Pedido completo de punta a punta, con el backend levantado~~ ✅ (2026-08-19)
 4. ~~Copiarle el `.env` a la notebook~~ ✅ (2026-08-19)
 5. ~~Crear el túnel nombrado + la seguridad del admin~~ ✅ (2026-08-19)
 6. ~~Probar un pedido con pago real de MercadoPago~~ ✅ (2026-08-19)
-7. Compilar el `.exe` e instalar como servicio
+7. ~~Compilar el `.exe` e instalar como servicio~~ ✅ (2026-11-16)
 8. ~~Activar los pedidos en `config.js`~~ ✅ (2026-08-19)
+
+### Lo que queda, por orden de importancia
+
+**1. Devolución del dinero al cancelar un pedido pagado** — *postergado a
+propósito por el dueño del proyecto, no olvidado.* Hoy, cuando se cancela un
+pedido ya pagado, **el cliente no recibe la plata de vuelta**: hay que
+devolvérsela a mano por fuera del sistema. El diseño ya está pensado:
+
+- Una acción **explícita**, no automática al cancelar — cancelar y devolver no
+  siempre van juntos (el pedido ya puede estar impreso).
+- Un aviso al cancelar un pedido pagado, para que nadie lo cancele sin saber
+  que queda plata del cliente adentro.
+- `POST https://api.mercadopago.com/v1/payments/{id}/refunds`, que exige el
+  header `X-Idempotency-Key`. El `mp_payment_id` ya se guarda en la base, así
+  que no falta ningún dato.
+- **Dos preguntas abiertas antes de implementar:** ¿se permiten devoluciones
+  parciales (por ejemplo si de tres documentos salió uno)? ¿y puede devolver
+  cualquiera que tenga el token, o hace falta algo más?
+
+**2. `/docs` y `/openapi.json` siguen públicos.** No filtran datos, pero
+publican la lista completa de endpoints, incluidos los de admin. Conviene
+desactivarlos en producción.
+
+**3. Reservar la IP de la impresora en el router** (ver trampas). Si el DHCP le
+cambia la IP, la impresión se corta sin avisar y el error de SumatraPDF no dice
+eso. Depende de quien administre la red del local.
+
+**4. Detalle menor:** `prueba_pedido.py` muestra un traceback en vez de un
+mensaje claro cuando el archivo de prueba no existe.
 
 ---
 
-## Tanda de mejoras (planificada el 2026-08-20, implementada el 2026-08-25)
+## Tanda de mejoras (planificada el 2026-08-20, completada el 2026-11)
 
 | # | Qué | Estado |
 |---|---|---|
 | 1 | Que la web no invente "10 páginas" | ✅ hecho |
 | 2 | Avisar el límite de tamaño y subirlo a 95 MB | ✅ hecho |
 | 3 | Aceptar Word, Excel y PowerPoint, y convertirlos a PDF | ✅ hecho |
-| 4 | Pedidos con varios documentos | ⬅️ **lo único que falta** |
+| 4 | Pedidos con varios documentos | ✅ hecho |
 | 5 | Contar páginas en el navegador | en pausa, a la espera de errores reales |
 
 Planes: [conversión de formatos](docs/plan-conversion-de-formatos.md) ·
@@ -369,15 +479,35 @@ cliente real y no figuraba en el plan.
   tanto, la web avisa que el diseño puede moverse y sugiere subir un PDF si se
   necesita exactitud.
 
-### Sigue pendiente de decidir (solo afecta al punto 4)
+**Pedidos con varios documentos, cada uno con su propia configuración.** La
+interfaz crece con los archivos: la sección de opciones cambia según el
+documento seleccionado, y **no hay opciones por defecto** (`OPCIONES_VACIAS`),
+para que nadie pague una configuración que no miró. El backend acepta el
+formato viejo (un documento) y el nuevo, así que el orden del deploy no
+importa. El espejo de precios entre `pricing.py` y `precio.js` está verificado
+automáticamente por `verificar_espejo_precios.py`, que corre el motor JS con
+Node y compara contra Python: **223 casos, cero diferencias**.
 
-- ¿Qué estado toma un pedido de varios documentos si uno imprime y otro no?
+**Botón de reimprimir en el panel de operador** (`POST
+/admin/orders/{id}/reimprimir`, opcionalmente con `?file_id=`). Antes, un
+pedido que fallaba quedaba muerto: la impresión se dispara una sola vez, al
+confirmar el pago, y esa función es idempotente a propósito para que
+MercadoPago no imprima dos veces. Funciona **desde cualquier estado, incluido
+`cancelado`** — de ese estado no sale ninguna transición, así que un pedido
+cancelado por error no tenía ninguna salida.
+
+### Resuelto: qué pasa si de varios documentos uno imprime y otro no
+
+El pedido queda en `imprimiendo` con `requiere_manual = 1`, y el panel muestra
+**qué documento falló** (`documentos_fallados`), no solo que "requiere
+atención". Con varios documentos eso no alcanzaba: el operador tiene que saber
+cuál reimprimir antes de entregar. Reimprimir solo ese documento limpia la
+marca si no queda ninguno pendiente.
 
 ### Entorno de la notebook
 
 LibreOffice instalado y verificado con `.ppt` y `.pps` reales. Si no quedara en
 la ruta por defecto, se configura con `PRINTNET_SOFFICE` en el `.env`.
 
-**Ojo con los dos `.env`:** hay uno en `backend-printnet\` (lo usa Python
-suelto, que es como se trabaja) y otro en `dist\` (lo usa el `.exe`). Manda el
-de la carpeta desde donde se arranca.
+**Ojo con los `.env`: ahora son tres** y el de producción es el de
+`C:\PrintNet\servicio\`. Ver la trampa correspondiente más arriba.
