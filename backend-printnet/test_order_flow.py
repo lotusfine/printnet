@@ -23,7 +23,7 @@ os.environ["PRINTNET_UPLOADS"] = tempfile.mkdtemp()
 
 import database  # noqa: E402
 import print_dispatch  # noqa: E402
-from order_flow import confirmar_pago  # noqa: E402
+from order_flow import confirmar_pago, despachar_tras_pago  # noqa: E402
 
 fallos: list[str] = []
 
@@ -98,13 +98,20 @@ def leer(order_id: int) -> sqlite3.Row:
     return row, [d["ok"] for d in despachos]
 
 
+def pagar(order_id: int) -> str:
+    """El camino real: marcar pagado, commit, y recién después imprimir."""
+    conn = database.get_conn()
+    confirmar_pago(conn, order_id)
+    conn.commit()
+    conn.close()
+    return despachar_tras_pago(order_id)
+
+
 # ─────────────────────────────────────────────
 print("\n== Todos los documentos imprimen ==")
 
 pid = armar_pedido(["a.pdf", "b.pdf", "c.pdf"])
-conn = database.get_conn()
-estado = confirmar_pago(conn, pid)
-conn.commit(); conn.close()
+estado = pagar(pid)
 row, despachos = leer(pid)
 
 check("el pedido queda imprimiendo", estado, "imprimiendo")
@@ -116,9 +123,7 @@ check("NO requiere atención manual", bool(row["requiere_manual"]), False)
 print("\n== Uno de tres falla (el caso que importa) ==")
 
 pid = armar_pedido(["a.pdf", "roto.pdf", "c.pdf"])
-conn = database.get_conn()
-estado = confirmar_pago(conn, pid)
-conn.commit(); conn.close()
+estado = pagar(pid)
 row, despachos = leer(pid)
 
 check("el pedido igual queda imprimiendo: dos ya salieron", estado, "imprimiendo")
@@ -130,9 +135,7 @@ check("y el pedido REQUIERE atención manual", bool(row["requiere_manual"]), Tru
 print("\n== Fallan todos ==")
 
 pid = armar_pedido(["roto1.pdf", "roto2.pdf"])
-conn = database.get_conn()
-estado = confirmar_pago(conn, pid)
-conn.commit(); conn.close()
+estado = pagar(pid)
 row, despachos = leer(pid)
 
 check("no queda imprimiendo, porque no salió nada", estado, "pendiente")
@@ -143,9 +146,7 @@ check("y el pedido igual queda pagado", bool(row["pagado"]), True)
 print("\n== Un solo documento, como los pedidos de siempre ==")
 
 pid = armar_pedido(["unico.pdf"])
-conn = database.get_conn()
-estado = confirmar_pago(conn, pid)
-conn.commit(); conn.close()
+estado = pagar(pid)
 row, despachos = leer(pid)
 
 check("imprime normal", estado, "imprimiendo")
@@ -157,14 +158,50 @@ print("\n== Idempotencia: el webhook de MP puede llegar dos veces ==")
 
 pid = armar_pedido(["x.pdf", "y.pdf"])
 conn = database.get_conn()
-confirmar_pago(conn, pid)
+primero = confirmar_pago(conn, pid)
 conn.commit()
 segundo = confirmar_pago(conn, pid)
 conn.commit(); conn.close()
-row, despachos = leer(pid)
+_, despachos = leer(pid)
 
-check("la segunda vez devuelve el estado sin re-despachar", segundo, "imprimiendo")
-check("no se duplicaron los despachos", len(despachos), 2)
+check("la primera confirmación es la que cuenta", primero, True)
+check("la segunda dice que ya estaba pagado", segundo, False)
+check("confirmar NO imprime: eso va aparte", len(despachos), 0)
+
+despachar_tras_pago(pid)
+_, despachos = leer(pid)
+check("se imprime una sola vez, la que agendó la primera", len(despachos), 2)
+
+
+print("\n== El pago queda guardado ANTES de imprimir ==")
+# Lo que evita la doble impresión: si MP reintenta mientras se imprime, el
+# reintento tiene que ver el pedido ya pagado. Por eso el commit va antes del
+# despacho, y otra conexión lo tiene que ver.
+
+pid = armar_pedido(["z.pdf"])
+conn = database.get_conn()
+confirmar_pago(conn, pid)
+conn.commit(); conn.close()
+row, despachos = leer(pid)  # leer() abre otra conexión
+check("otra conexión ya lo ve pagado", bool(row["pagado"]), True)
+check("todavía sin imprimir", len(despachos), 0)
+check("en 'pendiente' mientras espera la impresora", row["estado"], "pendiente")
+
+conn = database.get_conn()
+check("un reintento en ese momento no lo vuelve a tomar", confirmar_pago(conn, pid), False)
+conn.close()
+
+
+print("\n== Fotos: se paga pero no se imprime sola ==")
+
+pid = armar_pedido(["foto.jpg"])
+conn = database.get_conn()
+conn.execute("UPDATE orders SET tipo = 'fotos' WHERE id = ?", (pid,))
+conn.commit(); conn.close()
+estado = pagar(pid)
+_, despachos = leer(pid)
+check("queda pendiente para el mostrador", estado, "pendiente")
+check("sin despachos", len(despachos), 0)
 
 
 # ─────────────────────────────────────────────
@@ -177,9 +214,8 @@ print("\n== Reimprimir ==")
 from order_flow import reimprimir  # noqa: E402
 
 pid = armar_pedido(["a.pdf", "roto.pdf"])
+pagar(pid)
 conn = database.get_conn()
-confirmar_pago(conn, pid)
-conn.commit()
 row, despachos = leer(pid)
 check("después del pago hay 2 intentos", len(despachos), 2)
 
@@ -203,9 +239,9 @@ check("reimprimir uno solo agrega un intento", len(despachos), 5)
 check("y despacha solo ese", r["despachados"], 1)
 
 # Un pedido cancelado tiene que poder reimprimirse: era un callejón sin salida
-conn = database.get_conn()
 pid2 = armar_pedido(["x.pdf"])
-confirmar_pago(conn, pid2)
+pagar(pid2)
+conn = database.get_conn()
 conn.execute("UPDATE orders SET estado = 'cancelado' WHERE id = ?", (pid2,))
 conn.commit()
 r = reimprimir(conn, pid2)
@@ -215,9 +251,9 @@ check("un pedido cancelado se puede reimprimir", r["despachados"], 1)
 check("y vuelve a estar en curso", row["estado"], "imprimiendo")
 
 # Reimprimir lo que salió bien limpia la marca de atención manual
-conn = database.get_conn()
 pid3 = armar_pedido(["bien.pdf"])
-confirmar_pago(conn, pid3)
+pagar(pid3)
+conn = database.get_conn()
 conn.execute("UPDATE orders SET requiere_manual = 1 WHERE id = ?", (pid3,))
 conn.commit()
 reimprimir(conn, pid3)

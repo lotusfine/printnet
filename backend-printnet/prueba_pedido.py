@@ -27,6 +27,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 
 import requests
 
@@ -140,15 +141,27 @@ def main() -> int:
     for campo, valor in pedido.items():
         print(f"  {campo:16}: {valor}")
 
+    # La impresión corre en segundo plano después de crear el pedido, así que
+    # la respuesta dice 'pendiente' aunque todo ande: el estado real se
+    # consulta, esperando un poco a que la impresora lo tome.
+    estado_final = pedido.get("estado")
     token = pedido.get("token")
     if token:
-        s = requests.get(f"{args.url}/orders/status/{token}", timeout=30)
-        if s.ok:
+        datos_estado = None
+        for _ in range(30):
+            s = requests.get(f"{args.url}/orders/status/{token}", timeout=30)
+            if not s.ok:
+                break
+            datos_estado = s.json()
+            estado_final = datos_estado.get("estado")
+            if estado_final != "pendiente":
+                break
+            time.sleep(2)
+        if datos_estado:
             print("\n--- Estado consultado ---")
-            for campo, valor in s.json().items():
+            for campo, valor in datos_estado.items():
                 print(f"  {campo:16}: {valor}")
 
-    estado_final = pedido.get("estado")
     print()
     if estado_final == "imprimiendo":
         print("El pedido se despachó. Andá a mirar la impresora.")

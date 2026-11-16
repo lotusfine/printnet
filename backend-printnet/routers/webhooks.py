@@ -4,8 +4,9 @@ Recibe las notificaciones de pago de Checkout Pro, valida la firma
 (x-signature, HMAC-SHA256 con MP_WEBHOOK_SECRET) y consulta el estado real
 del pago contra la API de MercadoPago antes de tocar el pedido.
 
-- pago "approved"  → order_flow.confirmar_pago(): el MISMO flujo post-pago
-  de siempre (triage, dispatch simulado, email "recibido").
+- pago "approved"  → order_flow.confirmar_pago() marca el pedido pagado; la
+  impresión y el email "recibido" se agendan en segundo plano, después del
+  commit, para responder dentro de los 22 s aunque el PDF sea enorme.
 - pago "rejected"/"cancelled" → estado 'pago_rechazado', sin disparar nada.
 
 Responde 200 rápido en todos los casos válidos (límite de 22s de MercadoPago;
@@ -22,7 +23,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 import notifications
 import payments
 from database import get_db
-from order_flow import confirmar_pago
+from order_flow import confirmar_pago, despachar_tras_pago
 
 logger = logging.getLogger("printnet.webhooks")
 router = APIRouter()
@@ -99,13 +100,18 @@ async def webhook_mercadopago(
     )
 
     if status == "approved":
-        ya_pagado = bool(order["pagado"])
-        estado = confirmar_pago(db, order["id"])  # idempotente ante reintentos
+        recien_pagado = confirmar_pago(db, order["id"])  # idempotente ante reintentos
+        # Commit ANTES de imprimir: si MP reintenta mientras la impresora
+        # trabaja, el reintento tiene que ver el pedido ya pagado.
         db.commit()
-        if not ya_pagado:
+        if recien_pagado:
+            background.add_task(despachar_tras_pago, order["id"])
             background.add_task(notifications.notificar_pedido_recibido, order["id"])
-        logger.info("Pago %s aprobado → pedido %s en '%s'", data_id, order["id"], estado)
-        return {"ok": True, "estado": estado}
+        logger.info(
+            "Pago %s aprobado → pedido %s %s", data_id, order["id"],
+            "a imprimir" if recien_pagado else "(ya estaba pagado)",
+        )
+        return {"ok": True, "estado": "pagado"}
 
     if status in ESTADOS_RECHAZO:
         # Solo si todavía no estaba pagado (un rechazo posterior no des-paga)

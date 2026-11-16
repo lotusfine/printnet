@@ -6,14 +6,16 @@ Se extrajo acá para que la disparen, SIN duplicarla:
   - el webhook de MercadoPago cuando el pago queda "approved", y
   - el botón de reimprimir del panel de operador.
 
-El email "pedido recibido" lo agenda el caller (necesita BackgroundTasks del
-request).
+El despacho (`despachar_tras_pago`) y el email "pedido recibido" los agenda el
+caller en segundo plano, DESPUÉS de hacer commit de `confirmar_pago`: así el
+webhook responde enseguida y un reintento de MercadoPago ve el pedido pagado.
 """
 
 import json
 import logging
 import sqlite3
 
+from database import get_conn
 from print_dispatch import get_dispatcher
 
 logger = logging.getLogger("printnet.order_flow")
@@ -123,40 +125,84 @@ def reimprimir(conn: sqlite3.Connection, order_id: int, file_ids=None) -> dict:
     return resultado
 
 
-def confirmar_pago(conn: sqlite3.Connection, order_id: int) -> str:
-    """Marca el pedido como pagado y ejecuta el triage. Devuelve el estado final.
+def confirmar_pago(conn: sqlite3.Connection, order_id: int) -> bool:
+    """Marca el pedido como pagado. Devuelve True si ESTA llamada lo marcó.
 
-    Idempotente: si el pedido ya estaba pagado (webhook repetido de
-    MercadoPago), no vuelve a despachar ni cambia nada. Para volver a imprimir
-    a propósito está `reimprimir()`.
+    NO imprime. El caller hace commit y, si dio True, agenda
+    `despachar_tras_pago` en segundo plano.
+
+    Antes imprimía acá adentro, o sea adentro del webhook de MercadoPago, y
+    `pagado = 1` recién se guardaba al final. Con un PDF grande el webhook
+    pasaba los 22 s de MP (y los 100 s de Cloudflare), MP reintentaba, y el
+    reintento no veía el pedido pagado: lo imprimía OTRA VEZ. Ahora la marca
+    es un UPDATE condicional y se guarda antes de imprimir: de dos
+    confirmaciones, aunque lleguen juntas, gana una sola.
     """
-    order = conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
-    if order is None:
+    existe = conn.execute("SELECT 1 FROM orders WHERE id = ?", (order_id,)).fetchone()
+    if existe is None:
         raise ValueError(f"pedido {order_id} inexistente")
-    if order["pagado"]:
-        return order["estado"]
+    cur = conn.execute(
+        "UPDATE orders SET pagado = 1, estado = 'pendiente',"
+        " updated_at = datetime('now') WHERE id = ? AND pagado = 0",
+        (order_id,),
+    )
+    return cur.rowcount == 1
 
-    estado = "pendiente"
-    printer_id = None
-    # Un despacho que falla después del pago no se puede "cancelar": el papel
-    # de los documentos que sí salieron ya se gastó. Lo único razonable es que
-    # el operador se entere antes de entregar el pedido.
-    atencion_manual = False
 
-    if order["tipo"] == "fotocopias":
+def despachar_tras_pago(order_id: int) -> str:
+    """Imprime un pedido recién pagado y deja su estado al día. Devuelve el estado.
+
+    Corre en segundo plano, después de que el request ya respondió, así que
+    abre su PROPIA conexión: la del request ya está cerrada.
+
+    Los pedidos de fotos no se imprimen solos: se cotizan y se hacen en el
+    mostrador, así que quedan en 'pendiente'.
+    """
+    conn = get_conn()
+    try:
+        order = conn.execute(
+            "SELECT tipo, estado FROM orders WHERE id = ?", (order_id,)
+        ).fetchone()
+        if order is None:
+            raise ValueError(f"pedido {order_id} inexistente")
+        if order["tipo"] != "fotocopias":
+            return order["estado"]
+
         r = despachar_pedido(conn, order_id)
+        estado = "pendiente"
+        printer_id = None
         if r["despachados"]:
             estado = "imprimiendo"
             printer = conn.execute(
                 "SELECT id FROM printers WHERE estado = 'activa' ORDER BY id LIMIT 1"
             ).fetchone()
             printer_id = printer["id"] if printer else None
-        atencion_manual = bool(r["fallados"])
 
-    conn.execute(
-        "UPDATE orders SET pagado = 1, estado = ?, printer_id = ?,"
-        " requiere_manual = requiere_manual OR ?,"
-        " updated_at = datetime('now') WHERE id = ?",
-        (estado, printer_id, int(atencion_manual), order_id),
-    )
-    return estado
+        # Solo si sigue en 'pendiente': mientras se imprimía, el operador pudo
+        # haberlo cancelado o marcado listo, y eso no se pisa.
+        conn.execute(
+            "UPDATE orders SET estado = ?, printer_id = ?, updated_at = datetime('now')"
+            " WHERE id = ? AND estado = 'pendiente'",
+            (estado, printer_id, order_id),
+        )
+        # Un despacho que falla después del pago no se puede "cancelar": el
+        # papel de los documentos que sí salieron ya se gastó. Lo único
+        # razonable es que el operador se entere antes de entregar el pedido.
+        if r["fallados"]:
+            conn.execute(
+                "UPDATE orders SET requiere_manual = 1 WHERE id = ?", (order_id,)
+            )
+        conn.commit()
+        return estado
+    except Exception:
+        conn.rollback()
+        logger.exception("Pedido %s: falló el despacho tras el pago", order_id)
+        # El cliente ya pagó: que el panel lo muestre para reimprimirlo a mano.
+        try:
+            conn.execute("UPDATE orders SET requiere_manual = 1 WHERE id = ?", (order_id,))
+            conn.commit()
+        except Exception:
+            logger.exception("Pedido %s: tampoco se pudo marcar para revisión", order_id)
+        raise
+    finally:
+        conn.close()

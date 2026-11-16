@@ -25,7 +25,7 @@ import payments
 import pricing
 from database import UPLOADS_DIR, get_db
 from models import Pedido, PedidoFotocopias, PedidoFotos
-from order_flow import confirmar_pago
+from order_flow import confirmar_pago, despachar_tras_pago
 
 logger = logging.getLogger("printnet.orders")
 router = APIRouter()
@@ -320,7 +320,7 @@ def crear_pedido(
     if isinstance(pedido, PedidoFotocopias) and payments.modo_mercadopago():
         # MercadoPago real (Checkout Pro): el pedido queda en pendiente_pago
         # hasta que el webhook confirme el pago aprobado. El triage/dispatch
-        # y el email "recibido" se disparan recién ahí (order_flow.confirmar_pago).
+        # y el email "recibido" se disparan recién ahí (webhook → confirmar_pago + despachar_tras_pago).
         try:
             pref = payments.crear_preferencia(
                 order_id=order_id,
@@ -343,9 +343,12 @@ def crear_pedido(
         # Modo fantasma (sin MP_ACCESS_TOKEN configurado) o pedido de /fotos
         # (sin precio online: se cotiza y cobra en el local) → mismo flujo
         # que Fase 1: pago inmediato + triage + email.
-        estado = confirmar_pago(db, order_id)
-        pagado = True
+        confirmar_pago(db, order_id)
+        estado, pagado = "pendiente", True
         db.commit()
+        # Igual que el webhook: se imprime en segundo plano, así el cliente no
+        # espera a la impresora para ver su pedido confirmado.
+        background.add_task(despachar_tras_pago, order_id)
         background.add_task(notifications.notificar_pedido_recibido, order_id)
 
     return {
