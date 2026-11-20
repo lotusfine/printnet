@@ -18,3 +18,7 @@ backend/.project
 *.log
 .vercel
 .env*
+
+# graphify (grafo de conocimiento para desarrollo, solo en la Mac)
+graphify-out/
+.graphifyignore

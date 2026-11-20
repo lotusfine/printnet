@@ -66,3 +66,29 @@ El usuario está en una Mac y la notebook Windows está en la librería; relaya
 los comandos a mano, a veces por WhatsApp. Entonces: **comandos de una sola
 línea, uno por vez**, y esperar el resultado antes de mandar el siguiente.
 Nada de here-strings ni de bloques de varias líneas.
+
+## graphify
+
+Herramienta de desarrollo interno, **solo en la Mac**: `graphify-out/` está en
+`.gitignore` y nunca llega a la notebook del local. Es un grafo de conocimiento
+que une el código (`backend-printnet/`, `frontend/`) con los documentos
+(`ESTADO.md`, `SPEC.md`, `docs/`, `deploy/`), así una pregunta trae a la vez la
+función y la decisión o la trampa documentada que la explica. `backend/` (el
+Java viejo) quedó afuera a propósito.
+
+Cómo usarlo:
+- `ESTADO.md` se sigue leyendo primero; el grafo no lo reemplaza.
+- Para ubicarte antes de tocar algo, `graphify query "<pregunta>"` (se puede
+  preguntar en español). Para cómo se conectan dos cosas,
+  `graphify path "<A>" "<B>"`; para un concepto puntual, `graphify explain "<X>"`.
+  Devuelven un subgrafo chico, más barato que leer archivos enteros o grepear.
+- **El grafo es un mapa, no la fuente de verdad.** Antes de editar, abrí el
+  archivo real: las aristas `INFERRED`/`AMBIGUOUS` son inferencias, y los docs
+  pueden estar viejos (ej.: `docs/plan-conversion-de-formatos.md` todavía llama
+  "propuesto" a `document_convert.py`, que ya existe).
+- `graphify-out/GRAPH_REPORT.md` solo para una mirada general de arquitectura.
+- Los hooks de git actualizan el grafo solos en cada commit, pero **solo el
+  código**. Si cambiaste `ESTADO.md`, `SPEC.md` o algún plan, corré
+  `/graphify . --update` para que relea esos documentos.
+- Si borraste código y `graphify update` se niega a achicar el grafo, es una
+  protección: `graphify update . --force`.
