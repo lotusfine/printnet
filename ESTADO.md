@@ -5,7 +5,7 @@
 > técnico del backend está en `backend-printnet/SPEC.md`; el de la instalación
 > en Windows, en `backend-printnet/deploy/README.md`.
 >
-> Última actualización: **2026-11-16**
+> Última actualización: **2026-11-20**
 >
 > **El sistema está en producción y corriendo solo.** Backend y túnel son
 > servicios de Windows que arrancan con la notebook. Ver el punto 4.
@@ -297,6 +297,18 @@ requiere rearquitectura. Es la mejora natural si el volumen crece.
 
 ## Trampas conocidas (ya nos costaron tiempo)
 
+**El límite de tamaño está escrito dos veces.** `MAX_PEDIDO_MB` en
+`backend-printnet/subidas.py` y `MAX_ARCHIVO_MB` en `frontend/src/limites.js`
+tienen que coincidir. `MAX_FILE_MB` en `routers/orders.py` (95) es otro: el
+del camino viejo, que sí pasa entero por Cloudflare.
+
+**Un pedido recién pagado queda unos segundos en "pendiente".** Es el tiempo
+que tarda en imprimirse en segundo plano. No es un pedido trabado.
+
+**`git pull` en la notebook no cambia lo que corre.** El servicio usa la copia
+del `.exe` en `C:\PrintNet\servicio\`. Hasta recompilar y copiar, sigue el
+código viejo.
+
 **El hosting bloquea leer archivos ocultos desde cPanel.** El `.htaccess` no se
 puede ver ni editar por el panel ("Prohibido el acceso desde su ubicación").
 Para leerlo hay que sacarlo de un backup. Los archivos normales (como
@@ -447,12 +459,31 @@ mensaje claro cuando el archivo de prueba no existe.
 | 3 | Aceptar Word, Excel y PowerPoint, y convertirlos a PDF | ✅ hecho |
 | 4 | Pedidos con varios documentos | ✅ hecho |
 | 5 | Contar páginas en el navegador | en pausa, a la espera de errores reales |
+| 6 | Archivos de hasta 300 MB (subida en partes) | ✅ código hecho · ⬜ medir la notebook y desplegar |
 
 Planes: [conversión de formatos](docs/plan-conversion-de-formatos.md) ·
 [carga de archivos](docs/plan-carga-de-archivos.md) ·
 [varios documentos](docs/plan-multiples-archivos.md)
 
 ### Lo que cambió
+
+**Archivos de hasta 300 MB por pedido** — *código terminado y en `main`,
+todavía NO desplegado* (2026-11-20). Cloudflare corta las peticiones de más de
+100 MB, así que la web parte cada archivo en pedazos de 6 MB y la notebook los
+rearma (`subidas.py`). De paso, el archivo se sube **una sola vez**: antes se
+subía para contar páginas y otra vez al pagar. Las subidas abandonadas se
+borran a las 24 h. `/fotos` sigue con el límite de 95 MB.
+
+**Antes de desplegarlo falta medir la notebook** con un PDF de 300 MB
+(`medir_archivo_grande.py`, Tarea 0 de
+`docs/plan-subida-en-partes-implementacion.md`). Los timeouts de LibreOffice y
+SumatraPDF siguen en 120 s; según lo que dé la medición se dejan, se suben, o
+se frena todo si la memoria no aguanta. Después: backend primero (es
+compatible con la web vieja) y la web después (Tarea 6, pasos 5 y 6).
+
+**El webhook de MercadoPago ya no imprime.** Marca el pedido pagado, responde,
+y la impresión corre en segundo plano. Con archivos grandes, el webhook pasaba
+los 22 s de MP y el reintento podía imprimir el pedido dos veces.
 
 **La web ya no inventa páginas.** Había un valor por defecto de 10 que se usaba
 cuando el conteo fallaba, y el precio se calculaba sobre ese número: un

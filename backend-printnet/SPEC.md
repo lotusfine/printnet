@@ -203,6 +203,23 @@ con las páginas reales: **precio pre-compra ≡ precio post-compra**.
 
 ## Endpoints
 
+### Subida en partes (`routers/subidas.py`, lógica en `subidas.py`)
+
+Para archivos de hasta 300 MB por pedido a pesar del límite de 100 MB por
+petición de Cloudflare. Ver `docs/plan-subida-en-partes.md`.
+
+- `POST /uploads` `{nombre, tamano_bytes, content_type}` → 201 `{id, parte_bytes, partes}`.
+  413 si pasa de 300 MB, 422 si el formato no se acepta, 503 si las subidas
+  en curso ocupan más de 3 GB.
+- `PUT /uploads/{id}/partes/{n}` (cuerpo crudo, ≤ `parte_bytes`) → 200. Idempotente.
+- `POST /uploads/{id}/completar` → 202. Junta, convierte y cuenta en segundo plano.
+- `GET /uploads/{id}` → `{estado: subiendo|preparando|listo|error, paginas, convertido, error}`.
+- `DELETE /uploads/{id}` → 204. La web la llama al quitar o reemplazar un
+  documento, para que lo descartado no ocupe el tope de disco.
+
+Estado en `uploads/_subidas/{id}/meta.json`, sin tabla. Se borra a las 24 h
+(limpieza al arrancar y cada hora).
+
 ### `POST /orders/paginas` (multipart) → 200
 Campo `file`: un PDF. Devuelve `{ paginas }` sin crear pedido. Lo usa el frontend
 al subir el archivo para mostrar conteo y precio reales antes de comprar.
@@ -230,6 +247,11 @@ Errores: 422 (no es PDF / ilegible), 413 (>50 MB).
   - **Modo MercadoPago** (fotocopias con `MP_ACCESS_TOKEN` configurada): `estado: "pendiente_pago"`, `pagado: false`, `init_point` = URL de Checkout Pro **a la que el frontend debe redirigir**. El dispatch y el email quedan para el webhook.
   - **Modo fantasma o pedido /fotos**: `estado` final directo (imprimiendo/pendiente), `pagado: true`, `init_point: null` — igual que Fase 1.
 - Errores: 422 validación (formato `[{campo, error}]`), 413 archivo grande, 502 si MercadoPago no responde al crear la preferencia.
+- Acepta `files` (camino viejo, 95 MB, una sola petición) **o** `uploads`: un
+  JSON con los ids de subidas en partes, uno por documento, por posición. Solo
+  fotocopias; la suma no puede pasar de 300 MB. Las subidas se mueven a
+  `uploads/{token}/` recién después de validar y cotizar: un pedido rechazado
+  no las consume.
 
 ### `POST /webhooks/mercadopago` → 200
 Notificaciones de pago de MercadoPago (server-to-server).
@@ -244,6 +266,11 @@ Notificaciones de pago de MercadoPago (server-to-server).
    `rejected`/`cancelled` → `pago_rechazado` (solo si aún no estaba pagado);
    otros estados → sin acción.
 5. Responde 200 en menos de 1s (límite de MP: 22s).
+
+El webhook ya no imprime: `confirmar_pago()` marca el pedido (UPDATE
+condicional, commit) y `despachar_tras_pago()` corre en segundo plano. Antes
+la impresión iba adentro y con un PDF grande el reintento de MP podía
+imprimir dos veces.
 
 ### `GET /orders/status/{token}` → 200 (público, sin login)
 `{ token, tipo, estado, precio_total, archivos, creado, actualizado }` · 404 si no existe. Token = UUID v4, no adivinable.

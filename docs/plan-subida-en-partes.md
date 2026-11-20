@@ -1,5 +1,8 @@
 # Plan: subida en partes (archivos de hasta 300 MB)
 
+> **Implementado** (ver `ESTADO.md`). Plan de implementación:
+> [`plan-subida-en-partes-implementacion.md`](plan-subida-en-partes-implementacion.md).
+
 > Diseño acordado el 2026-11-16. Reemplaza la "Fase 2 — Una sola subida" de
 > [`plan-conversion-de-formatos.md`](plan-conversion-de-formatos.md): esto la
 > resuelve de paso.
