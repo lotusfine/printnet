@@ -494,8 +494,39 @@ midió es SumatraPDF hasta la Ricoh** (`--imprimir-una-hoja`): la impresora no
 estaba en uso. Por las dudas, `SumatraDispatcher.TIMEOUT_SEG` pasó de 120 a
 300 s. Pendiente medirlo cuando vuelva la impresora.
 
-Deploy: backend primero (es compatible con la web vieja) y la web después
-(Tarea 6, pasos 5 y 6 del plan de implementación).
+#### Dónde quedó el deploy (2026-11-20) — retomar desde acá
+
+Se trabaja en **la computadora servidor de la librería** (la que corre
+`PrintNetBackend`), no en la notebook de siempre, que no está disponible. Las
+rutas son las mismas (`C:\PrintNet\printnet`, `C:\PrintNet\servicio`).
+
+Hecho en esa computadora:
+1. ✅ `git pull` (con `main` en `a6dc5fd` o posterior).
+2. ✅ `medir_archivo_grande.py --megas 300 --memoria` (números arriba).
+3. ✅ `test_subidas.py` y `test_order_flow.py` pasan.
+4. ✅ `pyinstaller printnet.spec --noconfirm`: el `.exe` nuevo está en `dist\`.
+
+**Falta, en una PowerShell como administrador, de a un comando:**
+5. `Copy-Item C:\PrintNet\servicio\printnet-backend.exe C:\PrintNet\servicio\printnet-backend.anterior.exe` (copia para volver atrás)
+6. `Stop-Service PrintNetBackend`
+7. `Copy-Item C:\PrintNet\printnet\backend-printnet\dist\printnet-backend.exe C:\PrintNet\servicio\ -Force`
+8. `Start-Service PrintNetBackend`
+
+Al cierre de la sesión, producción **seguía con el backend viejo**: `POST
+/uploads` daba 404. Para verificar el cambio desde el Mac:
+- `curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'Content-Type: application/json' -d '{}' https://api.libreriaglaxara.com.ar/uploads` → **422** = backend nuevo (404 = sigue el viejo).
+- `curl -s -o /dev/null -w '%{http_code}\n' https://api.libreriaglaxara.com.ar/admin/orders` → **401** (503 = no leyó el `.env`).
+- Hacer un pedido chico desde la web vieja para confirmar que sigue tomando pedidos.
+
+Para volver atrás: `Stop-Service PrintNetBackend`, copiar
+`printnet-backend.anterior.exe` encima de `printnet-backend.exe`,
+`Start-Service PrintNetBackend`.
+
+Después: **deploy de la web** (Tarea 6, paso 6 del plan de implementación:
+`npm run build`, subir a cPanel de a un archivo tildando "sobrescribir",
+volver a poner la URL en `public_html/config.js`, probar con un PDF de más de
+100 MB). Y cuando vuelva la impresora, medir
+`medir_archivo_grande.py --megas 300 --imprimir-una-hoja`.
 
 **El webhook de MercadoPago ya no imprime.** Marca el pedido pagado, responde,
 y la impresión corre en segundo plano. Con archivos grandes, el webhook pasaba
