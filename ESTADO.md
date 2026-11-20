@@ -302,6 +302,10 @@ requiere rearquitectura. Es la mejora natural si el volumen crece.
 tienen que coincidir. `MAX_FILE_MB` en `routers/orders.py` (95) es otro: el
 del camino viejo, que sí pasa entero por Cloudflare.
 
+**Reimprimir un pedido muy pesado puede dar error de tiempo aunque se haya
+impreso.** Cloudflare corta la respuesta a los 100 s, pero la impresora sigue.
+Antes de volver a apretar, mirá si salió.
+
 **Un pedido recién pagado queda unos segundos en "pendiente".** Es el tiempo
 que tarda en imprimirse en segundo plano. No es un pedido trabado.
 
@@ -474,12 +478,24 @@ rearma (`subidas.py`). De paso, el archivo se sube **una sola vez**: antes se
 subía para contar páginas y otra vez al pagar. Las subidas abandonadas se
 borran a las 24 h. `/fotos` sigue con el límite de 95 MB.
 
-**Antes de desplegarlo falta medir la notebook** con un PDF de 300 MB
-(`medir_archivo_grande.py`, Tarea 0 de
-`docs/plan-subida-en-partes-implementacion.md`). Los timeouts de LibreOffice y
-SumatraPDF siguen en 120 s; según lo que dé la medición se dejan, se suben, o
-se frena todo si la memoria no aguanta. Después: backend primero (es
-compatible con la web vieja) y la web después (Tarea 6, pasos 5 y 6).
+**Medición en la computadora que hoy corre el servicio** (2026-11-20, con
+`medir_archivo_grande.py --megas 300 --memoria`). Ojo: **no es la notebook
+de siempre**, que no estaba disponible, sino la computadora servidor de la
+librería, donde corre `PrintNetBackend`.
+
+| Paso | Tiempo | Memoria pico |
+|---|---|---|
+| Contar páginas | 3,2 s | 301 MB |
+| Normalizar A4 → A4 | 7,2 s | 603 MB |
+| Normalizar A4 → A3 | 16,1 s | 603 MB |
+
+Holgado contra el límite que se había fijado (80 s, 1 GB). **Lo que NO se
+midió es SumatraPDF hasta la Ricoh** (`--imprimir-una-hoja`): la impresora no
+estaba en uso. Por las dudas, `SumatraDispatcher.TIMEOUT_SEG` pasó de 120 a
+300 s. Pendiente medirlo cuando vuelva la impresora.
+
+Deploy: backend primero (es compatible con la web vieja) y la web después
+(Tarea 6, pasos 5 y 6 del plan de implementación).
 
 **El webhook de MercadoPago ya no imprime.** Marca el pedido pagado, responde,
 y la impresión corre en segundo plano. Con archivos grandes, el webhook pasaba

@@ -120,7 +120,13 @@ class SumatraDispatcher(PrintDispatcher):
     """Impresión real en Windows vía el CLI de SumatraPDF."""
 
     nombre = "sumatra"
-    TIMEOUT_SEG = 120
+    # 300 y no 120: con la subida en partes llegan PDFs de hasta 300 MB, y
+    # SumatraPDF tiene que abrirlos enteros. No se pudo medir contra la Ricoh
+    # (2026-11-20, impresora fuera de uso), así que se dejó margen. Esperar de
+    # más no cuesta nada: el despacho corre en segundo plano, fuera de
+    # cualquier request. Lo único que lo sufre es "reimprimir" desde el panel,
+    # que Cloudflare corta a los 100 s aunque la impresora siga.
+    TIMEOUT_SEG = 300
 
     def __init__(self, exe_path: str | None = None, runner=None):
         self.exe_path = exe_path or os.environ.get(
@@ -161,8 +167,9 @@ class SumatraDispatcher(PrintDispatcher):
             except (KeyError, TypeError) as e:
                 return self._error(f"Opciones de impresión inválidas ({e}) en {options}")
 
-            # Nada acá adentro puede propagar una excepción: esto corre dentro
-            # del webhook de MercadoPago, y si revienta, MP reintenta el pago.
+            # Nada acá adentro puede propagar una excepción: un error acá
+            # tiene que terminar en un pedido marcado para atención manual,
+            # no en un despacho en segundo plano que muere sin dejar rastro.
             try:
                 proc = self._run(
                     cmd, capture_output=True, text=True, timeout=self.TIMEOUT_SEG
